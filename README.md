@@ -1,13 +1,13 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.3.1-blue.svg)](https://github.com/yourusername/wxbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.3.2-blue.svg)](https://github.com/yourusername/wxbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 > 一个功能完整、架构清晰的WX机器人框架，支持多 AI 平台接入、灵活的监听模式、丰富的管理命令和智能的消息处理流程。
 
 **作者**: [Siver](https://siver.top)
-**当前版本**: V4.3.1 - 配置文件整理 + 打包路径修复
+**当前版本**: V4.3.2 - API 接口列表化重构 + 文件传输助手管理员支持
 
 ---
 
@@ -60,7 +60,7 @@
 通过WX消息发送命令，实时管理机器人：
 - 用户管理：添加/删除用户、查看当前用户
 - 群组管理：添加/删除群、开启/关闭群机器人
-- 模型管理：切换 AI 模型、查看当前模型
+- 接口管理：查看接口列表、切换当前使用的接口
 - AI 设定：修改系统提示词
 - 系统管理：更新配置、查看状态、查看版本
 
@@ -141,14 +141,13 @@ python web_server.py
 
 ```json
 {
-    "api_sdk_list": ["OpenAI SDK", "Dify", "Coze", "DusAPI"],
-    "api_sdk": "DusAPI",
-    "api_key": "your-api-key",
-    "base_url": "https://api.dusapi.com",
-    "model1": "gpt-4",
-    "model2": "deepseek-v3",
+    "api_configs": [
+        {"sdk": "DusAPI", "key": "your-api-key", "url": "https://api.dusapi.com", "model": "gpt-5"},
+        {"sdk": "DusAPI", "key": "your-api-key", "url": "https://api.dusapi.com", "model": "claude-sonnet-4-6"}
+    ],
+    "api_index": 0,
     "prompt": "你是一个 AI 助手，请根据用户的问题给出回答",
-    "admin": "管理员昵称",
+    "admin": "文件传输助手",
     "AllListen_switch": false,
     "listen_list": ["用户1", "用户2"],
     "group": ["群聊1", "群聊2"],
@@ -188,11 +187,8 @@ python web_server.py
 
 | 配置项 | 类型 | 说明 |
 |--------|------|------|
-| `api_sdk_list` | array | 可选的 AI 接口类型列表（只读，供前端展示） |
-| `api_sdk` | string | 当前使用的 AI 接口类型：`DusAPI`（推荐）/ `OpenAI SDK` / `Dify` / `Coze` |
-| `api_key` | string | AI 平台的 API 密钥 |
-| `base_url` | string | API 请求基础地址 |
-| `model1` / `model2` | string | 模型标识，可通过命令切换 |
+| `api_configs` | array | AI 接口配置列表，每项含 `sdk`/`key`/`url`/`model` 四个字段 |
+| `api_index` | integer | 当前使用的接口索引（0-based），通过管理命令或面板切换 |
 | `prompt` | string | AI 系统提示词 |
 | `admin` | string | 管理员昵称，可发送管理命令 |
 | `AllListen_switch` | boolean | `false`=白名单模式，`true`=黑名单模式 |
@@ -285,11 +281,10 @@ python web_server.py
 /更改群机器人欢迎语为`新的欢迎语内容`
 ```
 
-#### 模型管理
+#### AI 接口管理
 ```
-/当前模型
-/切换模型1
-/切换模型2
+/查看接口列表              # 查看所有接口配置，▶ 标记当前使用
+/选择接口 N               # 切换至第 N 个接口（如：/选择接口 2）
 ```
 
 #### AI 设定
@@ -385,17 +380,26 @@ WX机器人主类，整合所有功能的核心控制类。
 
 ```
 接收消息
-  ↓
-黑/白名单过滤
-  ↓
-群聊消息？
-  ├─ 是 → 检测 @ → 去除 @ 标识 → 调用 AI
-  └─ 否 → 管理员命令？
-           ├─ 是 → 执行命令
-           └─ 否 → 关键词回复？
-                    ├─ 是 → 返回关键词回复
-                    └─ 否 → 调用 AI 回复
+  ├─ attr=friend → 黑/白名单过滤
+  │                  ↓
+  │               群聊消息？
+  │                  ├─ 是 → 检测 @ → 去除 @ 标识 → 调用 AI
+  │                  └─ 否 → 管理员命令？
+  │                            ├─ 是 → 执行命令
+  │                            └─ 否 → 关键词回复？
+  │                                      ├─ 是 → 返回关键词回复
+  │                                      └─ 否 → 调用 AI 回复
+  ├─ attr=self  → 窗口是管理员（文件传输助手）？
+  │                  ├─ 是 → 执行命令（不调用 AI，防止回复循环）
+  │                  └─ 否 → 忽略
+  └─ attr=system → 群新人欢迎语
 ```
+
+### 文件传输助手作为管理员
+
+没有第二个微信账号时，可将 `admin` 设置为 `文件传输助手`，在手机上用当前微信账号向「文件传输助手」发送指令，消息会同步到机器人所在的 PC 并被识别执行。
+
+面板「管理员」页有详细说明。
 
 ### 错误恢复机制
 
@@ -403,6 +407,28 @@ WX机器人主类，整合所有功能的核心控制类。
 - **回调异常检测**：监听器回调异常时自动停止
 - **邮件告警**：发生错误时自动发送邮件通知
 - **超时会话管理**：自动移除超时会话，释放资源
+
+---
+
+## 📝 开发日志
+
+### V4.3.2 (2026-03-20)
+- API 接口配置重构为列表形式（`api_configs`），支持添加/删除多个接口，面板上点选切换当前使用
+- 新增管理员指令：`/查看接口列表`、`/选择接口 N`，移除旧的 `/切换模型1`/`/切换模型2`
+- 新增文件传输助手作为管理员支持：手机向文件传输助手发指令，PC 端自动识别执行
+- 修复 self 消息回复循环 bug，管理员指令回复防循环处理
+- 默认管理员改为 `文件传输助手`
+
+### V4.3.1 (2026-03-20)
+- 配置文件统一整理到 `config/` 目录，日志目录重命名为 `panel_logs/`
+- 修复打包为 exe 后路径错误导致配置文件无法创建的问题
+- 新增面板内修改后台账号密码功能
+- 新增面板内修改报错邮箱配置功能
+
+### V4.3.0 (2026-03-19)
+- 新增 Web 状态面板：首页实时展示运行状态、消息统计、运行时长、监听模式等，5 秒自动刷新
+- 新增 DusAPI 支持：兼容 Claude、GPT 全系模型，国内稳定低延迟
+- Web 管理账密从硬编码抽离到 `admin.json`
 
 ---
 

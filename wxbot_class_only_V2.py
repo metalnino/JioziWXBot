@@ -2,8 +2,8 @@
 # Siver微信机器人 siver_wxbot - 面向对象版本 - wxautox4版本
 # 作者：https://www.siver.top
 
-version = "V4.3.1"
-version_log = "V4.3.1 - 配置文件整理 + 打包路径修复"
+version = "V4.3.2"
+version_log = "V4.3.2 - 整改模型配置选择、优化管理员指令"
 
 # ============================================================
 # 标准库导入
@@ -37,7 +37,7 @@ from cozepy import (
 
 # ============================================================
 # wxautox 相关导入（Plus版，需向作者购买授权）
-# 购买地址：https://github.com/cluic/wxauto
+# 购买地址：https://www.siver.top/static/img/siver_wx.jpg
 # ============================================================
 from wxautox4 import WeChat
 from wxautox4.msgs import *
@@ -93,13 +93,14 @@ class WXBotConfig:
         self.cmd = ""                   # 管理员账号（命令接收者）
 
         # ---------- AI 接口配置 ----------
-        self.api_sdk = ""               # API SDK 类型（OpenAI / Dify / Coze）
-        self.api_key = ""               # API 密钥
-        self.base_url = ""              # API 请求基础地址
-        self.model1 = ""                # 模型标识 1
-        self.model2 = ""                # 模型标识 2
-        self.prompt = ""                # AI 系统提示词
-        self.AtMe = ""                  # 机器人被 @ 的标识（如 "@机器人昵称"）
+        self.api_configs = []           # 接口配置列表，每项含 sdk/key/url/model
+        self.api_index = 0              # 当前使用的接口索引
+        self.api_sdk  = ""             # 当前接口 SDK（派生）
+        self.api_key  = ""             # 当前接口 Key（派生）
+        self.base_url = ""             # 当前接口 URL（派生）
+        self.model1   = ""             # 当前接口模型（派生，供 AI 类使用）
+        self.prompt   = ""             # AI 系统提示词
+        self.AtMe     = ""             # 机器人被 @ 的标识（如 "@机器人昵称"）
 
         # ---------- 群聊配置 ----------
         self.group = []                 # 监听的群聊列表
@@ -150,14 +151,13 @@ class WXBotConfig:
         try:
             if not os.path.exists(self.CONFIG_FILE):
                 base_config = {
-                    "api_sdk_list": ["OpenAI SDK", "Dify", "Coze"],
-                    "api_sdk": "OpenAI SDK",
-                    "api_key": "your-api-key",
-                    "base_url": "https://api.example.com/v1",
-                    "model1": "模型名称1",
-                    "model2": "模型名称2",
+                    "api_configs": [
+                        {"sdk": "DusAPI", "key": "your-api-key", "url": "https://api.dusapi.com", "model": "gpt-5"},
+                        {"sdk": "DusAPI", "key": "your-api-key", "url": "https://api.dusapi.com", "model": "claude-sonnet-4-6"},
+                    ],
+                    "api_index": 0,
                     "prompt": "你是一个ai回复助手，请根据用户的问题给出回答",
-                    "admin": "管理员备注名",
+                    "admin": "文件传输助手",
                     "AllListen_switch": False,
                     "listen_list": [],
                     "group": [],
@@ -204,12 +204,43 @@ class WXBotConfig:
 
     def update_global_config(self):
         """将 self.config 字典中的各配置项同步到对应实例属性"""
-        # AI 接口相关
-        self.api_sdk  = self.config.get('api_sdk', "")
-        self.api_key  = self.config.get('api_key', "")
-        self.base_url = self.config.get('base_url', "")
-        self.model1   = self.config.get('model1', "")
-        self.model2   = self.config.get('model2', "")
+        # AI 接口列表（新格式）
+        # 旧配置迁移：若 api_configs 不存在则从旧字段迁移并立即写回
+        if 'api_configs' not in self.config and 'api_sdk' in self.config:
+            self.config['api_configs'] = [
+                {
+                    'sdk':   self.config.get('api_sdk', 'DusAPI'),
+                    'key':   self.config.get('api_key', ''),
+                    'url':   self.config.get('base_url', 'https://api.dusapi.com'),
+                    'model': self.config.get('model1', 'gpt-5'),
+                },
+                {
+                    'sdk':   self.config.get('api_sdk', 'DusAPI'),
+                    'key':   self.config.get('api_key', ''),
+                    'url':   self.config.get('base_url', 'https://api.dusapi.com'),
+                    'model': self.config.get('model2', 'claude-sonnet-4-6'),
+                },
+            ]
+            self.config['api_index'] = 0
+            for old_key in ('api_sdk', 'api_key', 'base_url', 'model1', 'model2', 'api_sdk_list'):
+                self.config.pop(old_key, None)
+            self.save_config()
+            log(message="旧 API 配置已自动迁移为新格式并保存")
+
+        self.api_configs = self.config.get('api_configs', [
+            {"sdk": "DusAPI", "key": "", "url": "https://api.dusapi.com", "model": "gpt-5"},
+            {"sdk": "DusAPI", "key": "", "url": "https://api.dusapi.com", "model": "claude-sonnet-4-6"},
+        ])
+        self.api_index = self.config.get('api_index', 0)
+        if self.api_index >= len(self.api_configs):
+            self.api_index = 0
+
+        # 从当前接口配置派生兼容属性（供 AI 接口类使用）
+        _cur = self.api_configs[self.api_index] if self.api_configs else {}
+        self.api_sdk  = _cur.get('sdk', 'DusAPI')
+        self.api_key  = _cur.get('key', '')
+        self.base_url = _cur.get('url', '')
+        self.model1   = _cur.get('model', '')
         self.prompt   = self.config.get('prompt', "")
 
         # 微信基础配置
@@ -1026,6 +1057,20 @@ class WXBot:
                             text + '\n' + result['message'],
                         )
 
+            elif msg.attr == "self":
+                # 自己账号同步过来的消息（如从手机向文件传输助手发送指令）
+                # 仅当当前窗口与管理员配置匹配时才作为指令处理
+                if chat.who == self.config.cmd:
+                    self.msg_received_count += 1
+                    self.last_msg_time   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.last_msg_sender = msg.sender
+                    result = self.process_command(chat, msg)
+                    if not result:
+                        self.is_err(
+                            self.wx.nickname + f" wxbot处理管理员指令失败！",
+                            text + '\n' + result['message'],
+                        )
+
         except Exception as e:
             # 回调函数出现未捕获异常时标记 callback_is_die，由主循环检测并处理
             self.callback_is_die = True
@@ -1152,19 +1197,19 @@ class WXBot:
         result = True
         content = message.content
 
-        if "/添加用户" in content:
+        if content.startswith("/添加用户"):
             result = self.handle_add_user(chat, message)
-        elif "/删除用户" in content:
+        elif content.startswith("/删除用户"):
             result = self.handle_remove_user(chat, message)
         elif content == "/当前用户":
-            result = chat.SendMsg(content + '\n' + ", ".join(self.config.listen_list))
+            result = chat.SendMsg("当前用户：\n" + ", ".join(self.config.listen_list))
         elif content == "/当前群":
-            result = chat.SendMsg(content + '\n' + ", ".join(self.config.group))
+            result = chat.SendMsg("当前群：\n" + ", ".join(self.config.group))
         elif content == "/群机器人状态":
             result = self.handle_group_switch_status(chat, message)
-        elif "/添加群" in content:
+        elif content.startswith("/添加群"):
             result = self.handle_add_group(chat, message)
-        elif "/删除群" in content:
+        elif content.startswith("/删除群"):
             result = self.handle_remove_group(chat, message)
         elif content == "/开启群机器人":
             result = self.handle_enable_group_bot(chat, message)
@@ -1177,18 +1222,16 @@ class WXBot:
         elif content == "/群机器人欢迎语状态":
             result = self.handle_welcome_msg_status(chat, message)
         elif content == "/当前群机器人欢迎语":
-            result = chat.SendMsg(content + '\n' + self.config.group_welcome_msg)
-        elif "/更改群机器人欢迎语为" in content:
+            result = chat.SendMsg("当前群机器人欢迎语：\n" + self.config.group_welcome_msg)
+        elif content.startswith("/更改群机器人欢迎语为"):
             result = self.handle_change_welcome_msg(chat, message)
-        elif content == "/当前模型":
-            result = chat.SendMsg(content + " " + self.api.DS_NOW_MOD)
-        elif content == "/切换模型1":
-            result = self.handle_switch_model(chat, message, self.config.model1)
-        elif content == "/切换模型2":
-            result = self.handle_switch_model(chat, message, self.config.model2)
+        elif content == "/查看接口列表":
+            result = self.handle_list_api_configs(chat, message)
+        elif content.startswith("/选择接口"):
+            result = self.handle_select_api_config(chat, message)
         elif content == "/当前AI设定":
             result = chat.SendMsg('当前AI设定：\n' + self.config.prompt)
-        elif "/更改AI设定为" in content or "/更改ai设定为" in content:
+        elif content.startswith("/更改AI设定为") or content.startswith("/更改ai设定为"):
             result = self.handle_change_prompt(chat, message)
         elif content == "/更新配置":
             self.config.refresh_config()
@@ -1203,8 +1246,10 @@ class WXBot:
         elif content == "/状态":
             result = self._build_status_msg(chat, message)
         else:
-            # 未匹配到任何指令，当作普通消息交给 AI 回复
-            result = self.wx_send_ai(chat, message)
+            # 未匹配到任何指令
+            # self 消息（文件传输助手场景下机器人自身回复的同步）不调用 AI，避免误触发关键词或 AI 回复
+            if message.attr != "self":
+                result = self.wx_send_ai(chat, message)
 
         return result
 
@@ -1213,7 +1258,13 @@ class WXBot:
         构建并发送机器人当前状态摘要信息。
         （从 process_command 中抽离，降低单函数复杂度）
         """
-        send_msg = "运行时间：" + self.config.get_run_time(self.start_time) + "\n"
+        wx_nickname = self.wx.nickname if self.wx else "未知"
+        send_msg  = f"账号：{wx_nickname}\n"
+        send_msg += "运行时间：" + self.config.get_run_time(self.start_time) + "\n"
+        send_msg += f"当前接口：{self.config.api_index + 1}/{len(self.config.api_configs)}  SDK：{self.config.api_sdk}  模型：{self.api.DS_NOW_MOD}\n"
+        send_msg += f"已收消息：{self.msg_received_count} 条  已回复：{self.msg_replied_count} 条\n"
+        if self.last_msg_time:
+            send_msg += f"最近消息：{self.last_msg_sender}（{self.last_msg_time}）\n"
 
         # 当前监听模式及列表
         if self.config.AllListen_switch:
@@ -1257,24 +1308,24 @@ class WXBot:
             result = self.wx.AddListenChat(nickname=user_to_add, callback=self.message_handle_callback)
             if result:
                 log(message=f"添加用户 {user_to_add} 监听完成")
-                return chat.SendMsg(message.content + ' 完成\n' + ", ".join(self.config.listen_list))
+                return chat.SendMsg('添加用户完成\n' + ", ".join(self.config.listen_list))
             else:
                 # 注册失败则回滚配置
                 self.config.remove_user(user_to_add)
                 log(level="ERROR", message=f"添加用户 {user_to_add} 监听失败, {result['message']}")
                 return chat.SendMsg(
-                    message.content + f" 失败\n{result['message']}\n" + ", ".join(self.config.listen_list)
+                    f"添加用户失败\n{result['message']}\n" + ", ".join(self.config.listen_list)
                 )
         else:
             # 黑名单模式下只更新配置，无需注册监听
-            return chat.SendMsg(message.content + ' 完成(黑名单)\n' + ", ".join(self.config.listen_list))
+            return chat.SendMsg('添加用户完成(黑名单)\n' + ", ".join(self.config.listen_list))
 
     def handle_remove_user(self, chat, message):
         """处理 /删除用户 指令：移除用户的监听注册并从配置中删除"""
         user_to_remove = re.sub("/删除用户", "", message.content).strip()
         self.wx.RemoveListenChat(user_to_remove)
         self.config.remove_user(user_to_remove)
-        return chat.SendMsg(message.content + ' 完成\n' + ", ".join(self.config.listen_list))
+        return chat.SendMsg('删除用户完成\n' + ", ".join(self.config.listen_list))
 
     def handle_group_switch_status(self, chat, message):
         """处理 /群机器人状态 指令：返回当前群机器人开关状态"""
@@ -1292,23 +1343,23 @@ class WXBot:
             result = self.wx.AddListenChat(nickname=new_group, callback=self.message_handle_callback)
             if result:
                 log(message=f"添加群组 {new_group} 监听完成")
-                return chat.SendMsg(message.content + ' 完成\n' + ", ".join(self.config.group))
+                return chat.SendMsg('添加群完成\n' + ", ".join(self.config.group))
             else:
                 # 注册失败则回滚配置
                 self.config.remove_group(new_group)
                 log(level="ERROR", message=f"添加群组 {new_group} 监听失败, {result['message']}")
                 return chat.SendMsg(
-                    message.content + f" 失败\n{result['message']}\n" + ", ".join(self.config.group)
+                    f"添加群失败\n{result['message']}\n" + ", ".join(self.config.group)
                 )
         else:
-            return chat.SendMsg(message.content + ' 完成(群机器人未开启)\n' + ", ".join(self.config.group))
+            return chat.SendMsg('添加群完成(群机器人未开启)\n' + ", ".join(self.config.group))
 
     def handle_remove_group(self, chat, message):
         """处理 /删除群 指令：移除群组的监听注册并从配置中删除"""
         group_to_remove = re.sub("/删除群", "", message.content).strip()
         self.wx.RemoveListenChat(group_to_remove)
         self.config.remove_group(group_to_remove)
-        return chat.SendMsg(message.content + ' 完成\n' + ", ".join(self.config.group))
+        return chat.SendMsg('删除群完成\n' + ", ".join(self.config.group))
 
     def handle_enable_group_bot(self, chat, message):
         """处理 /开启群机器人 指令：开启群机器人并重新初始化监听器"""
@@ -1357,10 +1408,30 @@ class WXBot:
         self.config.set_config('group_welcome_msg', new_welcome)
         return chat.SendMsg('群机器人欢迎语已更新\n' + self.config.group_welcome_msg)
 
-    def handle_switch_model(self, chat, message, model):
-        """处理切换模型指令：更新当前使用的 AI 模型"""
-        self.api.DS_NOW_MOD = model
-        return chat.SendMsg(message.content + ' 完成\n当前模型:' + self.api.DS_NOW_MOD)
+    def handle_list_api_configs(self, chat, message):
+        """处理 /查看接口列表 指令：返回所有接口配置的摘要"""
+        lines = ["接口列表："]
+        for i, cfg in enumerate(self.config.api_configs):
+            mark = "▶ " if i == self.config.api_index else "   "
+            lines.append(f"{mark}{i + 1}. {cfg.get('sdk', '')} | {cfg.get('model', '')} | {cfg.get('url', '')}")
+        return chat.SendMsg('\n'.join(lines))
+
+    def handle_select_api_config(self, chat, message):
+        """处理 /选择接口 N 指令：切换到第 N 个接口配置（1-indexed）"""
+        num_str = re.sub("/选择接口", "", message.content).strip()
+        try:
+            n = int(num_str)
+        except ValueError:
+            return chat.SendMsg("接口序号无效，请输入数字，如：/选择接口 2")
+        idx = n - 1
+        if idx < 0 or idx >= len(self.config.api_configs):
+            return chat.SendMsg(f"接口 {n} 不存在，当前共 {len(self.config.api_configs)} 个接口")
+        self.config.config['api_index'] = idx
+        self.config.save_config()
+        self.config.refresh_config()
+        self.api = self._init_api()
+        cfg = self.config.api_configs[idx]
+        return chat.SendMsg(f"已切换至接口 {n}\nSDK：{cfg.get('sdk', '')}\n模型：{cfg.get('model', '')}")
 
     def handle_change_prompt(self, chat, message):
         """处理 /更改AI设定为 指令：更新 AI 系统提示词"""
@@ -1392,9 +1463,8 @@ class WXBot:
             '[/群机器人欢迎语状态]\n'
             '[/当前群机器人欢迎语]\n'
             '[/更改群机器人欢迎语为***]\n'
-            '[/当前模型] （返回当前模型）\n'
-            '[/切换模型1] （切换回复模型为配置中的 model1）\n'
-            '[/切换模型2]\n'
+            '[/查看接口列表] （返回所有接口配置）\n'
+            '[/选择接口 N] （切换至第 N 个接口，如：/选择接口 2）\n'
             '[/当前AI设定] （返回当前AI设定）\n'
             '[/更改AI设定为***] （更改AI设定，***为AI设定）\n'
             '[/更新配置] （若在程序运行时修改过配置，请发送此指令以更新配置）\n'
@@ -1728,7 +1798,9 @@ class WXBot:
             "uptime":             uptime_str,
             "wx_nickname":        wx_nickname,
             "api_sdk":            self.config.api_sdk,
-            "model":              self.config.model1,
+            "model":              self.api.DS_NOW_MOD,
+            "api_index":          self.config.api_index + 1,
+            "api_total":          len(self.config.api_configs),
             "listen_mode":        "黑名单" if self.config.AllListen_switch else "白名单",
             "listen_count":       len(self.config.listen_list),
             "group_switch":       self.config.group_switch,
@@ -1761,12 +1833,16 @@ class WXBot:
         - 进入主循环，依次执行：离线检测、新好友检测、全局监听/定时任务
         """
         # self.key_pass(2025, 6, 20, 0, 0, 0)  # 打包保护锁（按需启用）
-        log(message=f"wxbot\n版本: wxbot_{self.ver}\n作者: https://siver.top\n")
+        log(message=f"wxbot\n版本: wxbot_{self.ver}\n作者: https://www.siver.top\n")
 
         # 激活授权校验
         if self.wxautox_activate_check():
             log(message="wxautox已激活")
         else:
+            log(level="ERROR", message="wxautox未激活，请购买激活后再运行程序！！")
+            log(level="ERROR", message="购买激活地址：https://www.siver.top/static/img/siver_wx.jpg")
+            log(level="ERROR", message="wxautox未激活，请购买激活后再运行程序！！")
+            log(level="ERROR", message="购买激活地址：https://www.siver.top/static/img/siver_wx.jpg")
             log(level="ERROR", message="wxautox未激活，请购买激活后再运行程序！！")
             log(level="ERROR", message="购买激活地址：https://www.siver.top/static/img/siver_wx.jpg")
             return False
@@ -1781,7 +1857,7 @@ class WXBot:
             check_counter      = 0
             check_new_counter  = 0
             last_time          = time.time()
-            log(message='siver_wxbot初始化完成，开始监听消息(作者:https://siver.top)')
+            log(message='siver_wxbot初始化完成，开始监听消息(作者:https://www.siver.top)')
             self.run_flag = True
         except Exception as e:
             print(traceback.format_exc())

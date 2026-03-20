@@ -180,13 +180,32 @@ def dashboard():
     if not config:
         return render_template('error.html', message='无法读取配置文件')
 
-    # 隐藏敏感信息
-    if 'api_key' in config:
-        config['api_key_display'] = '*' * len(config['api_key'])
-
-    # 兼容默认
-    config.setdefault('api_sdk_list', ["OpenAI SDK", "Dify", "Coze", "DusAPI"])
-    config.setdefault('api_sdk', config['api_sdk_list'][0])
+    # 旧配置迁移：只要旧字段存在就迁移并写回磁盘（无论 api_configs 是否已有）
+    if 'api_sdk' in config:
+        config['api_configs'] = [
+            {'sdk': config.get('api_sdk', 'DusAPI'), 'key': config.get('api_key', ''),
+             'url': config.get('base_url', 'https://api.dusapi.com'), 'model': config.get('model1', 'gpt-5')},
+            {'sdk': config.get('api_sdk', 'DusAPI'), 'key': config.get('api_key', ''),
+             'url': config.get('base_url', 'https://api.dusapi.com'), 'model': config.get('model2', 'claude-sonnet-4-6')},
+        ]
+        config['api_index'] = 0
+        for old_key in ('api_sdk', 'api_key', 'base_url', 'model1', 'model2', 'api_sdk_list'):
+            config.pop(old_key, None)
+        try:
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as _f:
+                json.dump(config, _f, ensure_ascii=False, indent=4)
+            log('SUCCESS', '旧 API 配置已自动迁移为新格式并保存')
+        except Exception as _e:
+            log('ERROR', f'迁移配置写入失败: {_e}')
+    config.setdefault('api_configs', [
+        {"sdk": "DusAPI", "key": "", "url": "https://api.dusapi.com", "model": "gpt-5"},
+        {"sdk": "DusAPI", "key": "", "url": "https://api.dusapi.com", "model": "claude-sonnet-4-6"},
+    ])
+    config.setdefault('api_index', 0)
+    # 隐藏 api_configs 中的 key
+    for item in config.get('api_configs', []):
+        if item.get('key'):
+            item['key'] = '*' * min(len(item['key']), 24)
 
     # —— 新增字段默认值（关键）——
     config.setdefault('group_welcome_random', 1.0)          # 新人欢迎概率
@@ -246,7 +265,7 @@ def _coerce_bool_fields(merged_config):
                 merged_config[field] = bool(v)
 
 def _coerce_list_fields(merged_config):
-    list_fields = ['listen_list', 'group', 'new_friend_msg', 'api_sdk_list', 'scheduled_msg_list']
+    list_fields = ['listen_list', 'group', 'new_friend_msg', 'scheduled_msg_list']
     for field in list_fields:
         if field in merged_config and not isinstance(merged_config[field], list):
             if isinstance(merged_config[field], str):
@@ -301,6 +320,11 @@ def save_config(config_data):
         original_config = read_config() or {}
         merged_config = {**original_config, **config_data}
 
+        # 若已有新格式 api_configs，清除旧 API 字段
+        if 'api_configs' in merged_config:
+            for _k in ('api_sdk', 'api_key', 'base_url', 'model1', 'model2', 'api_sdk_list'):
+                merged_config.pop(_k, None)
+
         _coerce_bool_fields(merged_config)
         _coerce_list_fields(merged_config)
         _coerce_float_fields(merged_config)
@@ -326,11 +350,19 @@ def save_config_route():
 
         current_config = read_config() or {}
 
-        # API Key 星号保留原值
-        if 'api_key' in config_data and isinstance(config_data['api_key'], str) and config_data['api_key'].startswith('*'):
-            config_data['api_key'] = current_config.get('api_key', '')
+        # api_configs 中 key 为星号时保留原值
+        if 'api_configs' in config_data and isinstance(config_data['api_configs'], list):
+            orig_configs = current_config.get('api_configs', [])
+            for i, item in enumerate(config_data['api_configs']):
+                if isinstance(item.get('key'), str) and item['key'].startswith('*'):
+                    item['key'] = orig_configs[i].get('key', '') if i < len(orig_configs) else ''
 
         merged_config = {**current_config, **config_data}
+
+        # 若已有 api_configs，清理旧 API 字段（兼容保存时自动完成迁移）
+        if 'api_configs' in merged_config:
+            for _k in ('api_sdk', 'api_key', 'base_url', 'model1', 'model2', 'api_sdk_list'):
+                merged_config.pop(_k, None)
 
         # 预处理（与 save_config 二次校验互补）
         _coerce_bool_fields(merged_config)
@@ -412,8 +444,9 @@ def load_config():
     config = read_config()
     if not config:
         return jsonify({'status': 'error', 'message': '无法读取配置文件'})
-    if 'api_key' in config:
-        config['api_key_display'] = '*' * len(config['api_key'])
+    for item in config.get('api_configs', []):
+        if item.get('key'):
+            item['key'] = '*' * min(len(item['key']), 24)
     return jsonify({'status': 'success', 'config': config})
 
 @app.route('/get_admin_config')
@@ -582,14 +615,13 @@ def main():
     try:
         if not os.path.exists(CONFIG_FILE):
             default_config = {
-                "api_sdk_list": ["OpenAI SDK", "Dify", "Coze", "DusAPI"],
-                "api_sdk": "DusAPI",
-                "api_key": "your-api-key",
-                "base_url": "https://api.dusapi.com/",
-                "model1": "模型名称1",
-                "model2": "模型名称2",
+                "api_configs": [
+                    {"sdk": "DusAPI", "key": "your-api-key", "url": "https://api.dusapi.com", "model": "gpt-5"},
+                    {"sdk": "DusAPI", "key": "your-api-key", "url": "https://api.dusapi.com", "model": "claude-sonnet-4-6"},
+                ],
+                "api_index": 0,
                 "prompt": "你是一个ai回复助手，请根据用户的问题给出回答",
-                "admin": "管理员备注名",
+                "admin": "文件传输助手",
                 "AllListen_switch": False,
                 "listen_list": [],
                 "group": [],
