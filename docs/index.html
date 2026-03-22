@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SiverWXBot Plus - 开源微信机器人</title>
+<title>SiverWXBot Plus - 开源WX机器人</title>
 <link rel="icon" href="favicon.ico" type="image/x-icon">
 <link href="lib/fonts.css" rel="stylesheet">
 <link href="lib/bootstrap.min.css" rel="stylesheet">
@@ -352,7 +352,7 @@ body {
     <h1 class="hero-title">
       <span class="t-siver">Siver</span><span class="t-wxbot">WXBot</span><span class="t-plus">Plus</span>
     </h1>
-    <p class="hero-subtitle">开源 · 成品 · 可直接使用 · 可二次开发</p>
+    <p class="hero-subtitle">开源 · 成品 · 可直接使用 · 可二次开发 · WX机器人</p>
     <div class="hero-tags">
       <span class="hero-tag">基于wxautox4</span>
       <span class="hero-tag">智能客服</span>
@@ -412,6 +412,7 @@ body {
 <!-- Footer -->
 <footer class="site-footer">
   <p>© 2025 SiverWXBot · Made by <a href="https://siver.top" target="_blank">Siver</a></p>
+  <p style="margin-top: 6px; font-size: 12px; opacity: 0.45;" id="footer-version"></p>
   <p style="margin-top: 8px;">
     <a href="https://github.com/SiverKing/SiverWXbot_plus" target="_blank">
       <i class="bi bi-github"></i> GitHub
@@ -419,5 +420,10 @@ body {
   </p>
 </footer>
 
+<script>
+fetch('version.json').then(r => r.json()).then(d => {
+  document.getElementById('footer-version').textContent = d.version_log || d.version || '';
+}).catch(() => {});
+</script>
 </body>
 </html>

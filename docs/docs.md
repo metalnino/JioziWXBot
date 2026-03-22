@@ -1,6 +1,6 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.5.1-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.5.2-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
@@ -20,7 +20,7 @@
 
 **环境要求：**
 - Windows 操作系统
-- Windows wx PC 版（`4.1.7` - `4.1.8` 版本）
+- Windows wx PC 版（`4.1.7` - `4.1.8.28` 版本）
 
 **下载地址（二选一）：**
 
@@ -37,7 +37,7 @@
 **环境要求：**
 - Python `3.8` - `3.12`
 - Windows 操作系统
-- Windows wx PC 版（`4.1.7` - `4.1.8` 版本）
+- Windows wx PC 版（`4.1.7` - `4.1.8.28` 版本）
 - wxautox4 授权（需购买，购买地址：https://www.siver.top/static/img/siver_wx.jpg ）
 
 **安装步骤：**
@@ -138,7 +138,7 @@ python web_server.py
 
 程序接管wx运行时，请勿手动干预，避免影响自动化操作。尽量减少操作电脑的次数，最好不要去手动操作wx
 
-1. 登录你的 Windows wx，注意版本要求与上方环境要求一致。
+1. 登录你的 Windows wx，注意版本要求与[安装部署](https://wxbot.siverking.online/docs.html?c=0)内说的环境要求一致。
 
 2. 保持 wx **主窗口开着**，不要打开 wx 的其他窗口，也不要最小化 wx。然后回到面板点击上方的 `启动机器人`，等待程序启动。
 
@@ -256,7 +256,7 @@ python web_server.py
 
 ### 消息指令调用参考
 
-采用管理员消息指令控制，红框为系统自动发送消息，非红框为人工发送消息。
+采用管理员消息指令控制，红框为系统自动发送消息，非红框为人工发送消息。按照图内使用测试即可。
 
 ![8](./img/8.png) ![9](./img/9.png) ![10](./img/10.png) ![11](./img/11.png)
 
@@ -270,7 +270,7 @@ python web_server.py
 2. 电脑自动休眠、黑屏都设为**从不**。
 3. 如需离线邮件提醒，请在配置面板修改设置邮件。
 4. 关闭wx自动更新。
-5. 适配 Windows wx `4.1.7` - `4.1.8.24`。
+5. 适配 Windows wx `4.1.7` - `4.1.8.28`。
 6. 程序接管wx运行时，请勿手动干预，避免影响自动化操作。
 7. **各 SDK 接口填写说明：**
    - **DusAPI**：填写 Key 和模型 ID，模型 ID 可从 https://docs.dusapi.com 查看
