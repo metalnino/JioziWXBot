@@ -1,15 +1,14 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.5.0-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.5.1-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 > 一个功能完整、架构清晰的WX机器人框架，支持多 AI 平台接入、对话记忆、灵活的监听模式、丰富的管理命令和智能的消息处理流程。
 
-**作者**: [Siver](https://siver.top)
-**当前版本**：V4.5.0
+**作者**: [Siver](https://www.siver.top)
 
-📖 **[查看完整使用文档](https://github.com/SiverKing/SiverWXbot_plus/blob/main/docs/docs.md)**
+📖 **[查看完整使用文档](https://wxbot.siverking.online)**
 
 ---
 

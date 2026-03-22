@@ -428,6 +428,20 @@ def stop_bot():
         log('WARNING', '状态：机器人未运行')
         return jsonify({'status': 'error', 'message': '机器人未运行'})
 
+@app.route('/check_update')
+@login_required
+def check_update():
+    try:
+        import requests as req
+        import wxbot_class_only_V2 as wxbot_mod
+        local_version = getattr(wxbot_mod, 'version', '')
+        r = req.get('https://wxbot.siverking.online/version.json', timeout=8)
+        data = r.json()
+        data['local_version'] = local_version
+        return jsonify({'status': 'success', 'data': data})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
 @app.route('/get_status')
 @login_required
 def get_status():

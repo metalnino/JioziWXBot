@@ -2,8 +2,8 @@
 # Siver微信机器人 siver_wxbot - 面向对象版本 - wxautox4版本
 # 作者：https://www.siver.top
 
-version = "V4.5.0"
-version_log = "V4.5.0 - 增加对话记忆功能"
+version = "V4.5.1"
+version_log = "V4.5.1 - 增加更新检查、文档站点"
 
 # ============================================================
 # 标准库导入
