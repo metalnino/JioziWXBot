@@ -1,6 +1,6 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.6.3-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.6.4-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
@@ -361,7 +361,7 @@ python web_server.py
 
 ### Q: 如何更新？ 
 
-**A:** 拉取最新的源码或者下载最新的exe，放到你旧版本的运行目录里替换或者直接使用即可。或者将旧运行目录的`config/` `memory/`文件夹备份，然后放在新的运行目录即可调用旧数据。更新前建议您旧备份运行目录`config/` `memory/`文件夹，避免数据丢失。
+**A:** 拉取最新的源码或者下载最新的exe，放到你旧版本的运行目录里替换或者直接使用即可。或者将旧运行目录的`config/` `memory/`文件夹备份，然后放在新的运行目录即可调用旧数据。更新前建议您备份旧运行目录的 `config/` `memory/` 文件夹，避免数据丢失。
 
 ---
 
