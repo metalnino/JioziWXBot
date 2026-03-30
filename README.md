@@ -1,6 +1,6 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.6.6-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.6.7-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
@@ -74,6 +74,15 @@
 - **拟人化操作** - 每个动作之间有 1~5 秒随机延时，模拟真实用户行为
 - **默认关闭** - 需手动在面板开启，不影响原有功能
 
+#### 随机定时发布朋友圈（新）
+- **时间窗口随机发布** - 设定起止时间（如 09:00~13:00），机器人在窗口内随机挑选时刻发布，避免固定规律被识别
+- **三种周期模式**
+  - **每天** - 每天必发，时间随机
+  - **每周** - 设置本周随机抽几天（1~7），周初自动随机选定，其余天跳过；例如设 5，则随机挑 5 天发布
+  - **每月** - 设置本月随机抽几天（1~本月天数），月初自动随机选定
+- **内容与隐私** - 同定时朋友圈，支持图文混发、三级隐私控制
+- **独立开关** - 每条任务可单独启用/禁用，与定时朋友圈互相独立
+
 #### 定时发送朋友圈
 - **全自动定时发圈** - 与定时消息完全相同的时间控制自由度（每天/每周/每月/单次/自定义日期）
 - **图文混发** - 支持纯文字、纯图片（最多9张）、图文混合，文字内容支持换行
@@ -89,6 +98,9 @@
 通过WX消息发送命令，实时管理机器人：
 - 用户管理：添加/删除用户、查看当前用户
 - 群组管理：添加/删除群、开启/关闭群机器人
+- 关键词管理：查看关键词配置、开关群聊@触发模式
+- 记忆管理：查看记忆状态、开关对话记忆
+- 延迟管理：查看延迟配置、开关回复延迟
 - 接口管理：查看接口列表、切换当前使用的接口
 - AI 设定：修改系统提示词
 - 系统管理：更新配置、查看状态、查看版本
@@ -231,6 +243,21 @@ python web_server.py
     "moments_like_switch": false,
     "moments_like_min": 60,
     "moments_like_max": 120,
+    "random_moments_switch": false,
+    "random_moments_list": [
+        {
+            "id": "rm001",
+            "enabled": true,
+            "time_start": "09:00",
+            "time_end": "13:00",
+            "repeat_type": "weekly",
+            "random_days_count": 5,
+            "text": "随机时间发的朋友圈～",
+            "images": [],
+            "privacy": "public",
+            "tags": []
+        }
+    ],
     "everyday_start_stop_bot_switch": false,
     "everyday_start_bot_time": "08:00",
     "everyday_stop_bot_time": "23:00",
@@ -274,6 +301,8 @@ python web_server.py
 | `moments_like_switch` | boolean | `false` | 是否开启随机朋友圈点赞（默认关闭） |
 | `moments_like_min` | integer | `60` | 随机点赞最小间隔（分钟，1~1440） |
 | `moments_like_max` | integer | `120` | 随机点赞最大间隔（分钟，≥min，最大 1440 = 24 小时） |
+| `random_moments_switch` | boolean | `false` | 是否开启随机定时朋友圈 |
+| `random_moments_list` | array | `[]` | 随机定时朋友圈任务列表，详见下方说明 |
 | `everyday_start_stop_bot_switch` | boolean | `false` | 是否开启每日定时启停机器人 |
 | `everyday_start_bot_time` | string | `"08:00"` | 每日自动启动时间（格式 `HH:MM`） |
 | `everyday_stop_bot_time` | string | `"23:00"` | 每日自动停止时间（格式 `HH:MM`） |
@@ -317,6 +346,29 @@ python web_server.py
 | `tags` | array | 隐私标签列表，`privacy` 非 `public` 时生效；**白名单**=仅这些标签的人可见；**黑名单**=屏蔽这些标签的人 |
 
 > **注意**：需要在手机端确认微信朋友圈功能已开启，否则 `wx.Moments()` 返回 `None` 并跳过发送。
+
+### 随机定时朋友圈任务（random_moments_list）字段说明
+
+每个随机定时朋友圈任务对象包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 任务唯一 ID（自动生成） |
+| `enabled` | boolean | 是否启用该任务 |
+| `time_start` | string | 时间窗口开始，格式 `HH:MM`（如 `"09:00"`） |
+| `time_end` | string | 时间窗口结束，格式 `HH:MM`（如 `"13:00"`）；机器人在窗口内随机选一个时刻发布 |
+| `repeat_type` | string | 重复类型：`daily`=每天 / `weekly`=每周 / `monthly`=每月 |
+| `random_days_count` | integer | 每周/每月随机抽取的发送天数（`weekly` 时 1~7；`monthly` 时 1~本月天数）；`daily` 模式下该字段忽略 |
+| `text` | string | 朋友圈文字内容，支持换行，可为空（但文字和图片至少有一项） |
+| `images` | array | 本地图片绝对路径列表，最多 **9 张**，可为空 |
+| `privacy` | string | 隐私设置：`public`=公开 / `whitelist`=白名单 / `blacklist`=黑名单 |
+| `tags` | array | 隐私标签列表，`privacy` 非 `public` 时生效 |
+
+**调度逻辑说明：**
+- `weekly` 模式：每周一开始时随机从 1~7 中抽取 `random_days_count` 天，缓存整周，本周内固定不变
+- `monthly` 模式：每月 1 日开始时随机从 1~本月天数 中抽取 `random_days_count` 天，缓存整月
+- 确定今天为发送日后，在 `[time_start, time_end]` 窗口内随机选取一个时刻（精确到秒）触发发布
+- 每天每任务最多触发一次，触发后当天不再重复
 
 ### admin.json 账密文件
 
@@ -401,12 +453,33 @@ python web_server.py
 /更改AI设定为`新的系统提示词`
 ```
 
+#### 关键词管理
+```
+/关键词状态                    # 查看私聊/群聊关键词开关、@触发状态、关键词列表
+/开启群聊关键词@触发           # 群聊关键词设为仅被@时触发
+/关闭群聊关键词@触发           # 取消@限制，任何消息均触发关键词匹配
+```
+
+#### 对话记忆管理
+```
+/记忆状态        # 查看对话记忆开关、上下文条数、最大存储条数
+/开启记忆        # 开启对话记忆
+/关闭记忆        # 关闭对话记忆
+```
+
+#### 回复延迟管理
+```
+/回复延迟状态    # 查看延迟开关及范围
+/开启回复延迟    # 开启模拟人工延迟
+/关闭回复延迟    # 关闭延迟，立即发送
+```
+
 #### 系统管理
 ```
 /更新配置        # 重新加载配置文件
 /当前版本        # 查看机器人版本
 /指令            # 查看所有可用命令
-/状态            # 查看机器人运行状态
+/状态            # 查看机器人运行状态（含关键词/记忆/延迟等完整信息）
 ```
 
 ---

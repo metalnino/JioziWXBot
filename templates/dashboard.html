@@ -120,7 +120,7 @@ body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "S
 .keyword-item textarea { min-height: 60px; }
 
 /* ===== Scheduled Msg ===== */
-.scheduled-msg-item, .scheduled-moments-item { background: var(--muted-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.scheduled-msg-item, .scheduled-moments-item, .random-moments-item { background: var(--muted-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
 .weekday-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--card); font-size: 12.5px; font-weight: 600; color: var(--muted); cursor: pointer; transition: all .15s; }
 .weekday-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 .weekday-btn:hover:not(.active) { border-color: var(--primary); color: var(--primary); }
@@ -411,6 +411,21 @@ body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "S
           <div class="stat-val" id="sv-api" style="font-size:13px;">-</div>
           <div class="stat-label">API SDK</div>
         </div>
+        <div class="stat-card" id="sc-keyword">
+          <div class="stat-icon"><i class="bi bi-key"></i></div>
+          <div class="stat-val" id="sv-keyword">-</div>
+          <div class="stat-label">关键词回复</div>
+        </div>
+        <div class="stat-card" id="sc-memory">
+          <div class="stat-icon"><i class="bi bi-brain"></i></div>
+          <div class="stat-val" id="sv-memory">-</div>
+          <div class="stat-label">对话记忆</div>
+        </div>
+        <div class="stat-card" id="sc-delay">
+          <div class="stat-icon"><i class="bi bi-hourglass-split"></i></div>
+          <div class="stat-val" id="sv-delay">-</div>
+          <div class="stat-label">回复延迟</div>
+        </div>
       </div>
       <!-- 详情行 -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -420,6 +435,8 @@ body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "S
         <div class="detail-row"><span class="detail-key">版本</span><span class="detail-val" id="dv-version">-</span></div>
         <div class="detail-row"><span class="detail-key">最近消息</span><span class="detail-val" id="dv-lasttime">-</span></div>
         <div class="detail-row"><span class="detail-key">最近发送者</span><span class="detail-val" id="dv-lastsender">-</span></div>
+        <div class="detail-row"><span class="detail-key">群词@触发</span><span class="detail-val" id="dv-kw-at">-</span></div>
+        <div class="detail-row"><span class="detail-key">记忆上下文</span><span class="detail-val" id="dv-mem-ctx">-</span></div>
       </div>
     </div>
   </div>
@@ -761,6 +778,98 @@ body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "S
           <div class="cfg-hint">最长 1440 分钟（24 小时）触发一次</div>
         </div>
       </div>
+    </div>
+
+    <!-- 随机定时朋友圈 -->
+    <div class="cfg-card" style="margin-bottom:20px;">
+      <div class="cfg-card-header"><i class="bi bi-shuffle"></i><h5>随机定时发布朋友圈</h5><span class="desc">时间窗口内随机选时发布，避免固定规律</span></div>
+      <div class="cfg-hint" style="margin-bottom:14px;padding:10px 14px;background:#f3f0ff;border:1px solid #c9b8ff;border-radius:6px;color:#4a1fa8;font-size:12.5px;line-height:1.9;">
+        <i class="bi bi-info-circle" style="color:#7c4dff;"></i>
+        <strong>功能说明：</strong>在设定的时间窗口内随机挑选一个时刻发布朋友圈，避免每天定点发布被发现规律。<br>
+        每周模式随机抽取指定天数（如设5天，则本周随机选5天发布，其余天跳过）；每月同理。<br>
+        <strong>⚠️ 注意：</strong>需要启动机器人后才会生效；文字和图片至少填写一项。
+      </div>
+      <div class="switch-row">
+        <input class="form-check-input" type="checkbox" id="random_moments_switch" name="random_moments_switch" {% if config.random_moments_switch %}checked{% endif %}>
+        <label for="random_moments_switch">启用随机定时朋友圈</label>
+      </div>
+      <div id="random_moments_container">
+        {% for item in config.random_moments_list %}
+        <div class="random-moments-item" data-rmid="{{ item.id }}">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <div class="switch-row" style="margin-bottom:0;flex:1">
+              <input class="form-check-input rm-enabled" type="checkbox" {% if item.enabled %}checked{% endif %}>
+              <label>启用此任务</label>
+            </div>
+            <button type="button" class="btn-rm btn-remove-item"><i class="bi bi-x-lg"></i></button>
+          </div>
+          <div class="row mb-2">
+            <div class="col-6">
+              <label class="cfg-label">发布时间窗口 开始</label>
+              <input type="time" class="form-control rm-time-start" value="{{ item.time_start }}">
+            </div>
+            <div class="col-6">
+              <label class="cfg-label">发布时间窗口 结束</label>
+              <input type="time" class="form-control rm-time-end" value="{{ item.time_end }}">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="cfg-label">重复类型</label>
+            <select class="form-select rm-repeat-type">
+              <option value="daily"   {% if item.repeat_type == 'daily'   %}selected{% endif %}>每天</option>
+              <option value="weekly"  {% if item.repeat_type == 'weekly'  %}selected{% endif %}>每周</option>
+              <option value="monthly" {% if item.repeat_type == 'monthly' %}selected{% endif %}>每月</option>
+            </select>
+          </div>
+          <div class="mb-2 rm-days-wrap" style="{% if item.repeat_type == 'daily' %}display:none{% endif %}">
+            <label class="cfg-label rm-days-label">
+              {% if item.repeat_type == 'monthly' %}每月随机抽几天发布{% else %}每周随机抽几天发布{% endif %}
+              <span class="cfg-hint" style="display:inline;margin-left:6px;" id="">（不超过{% if item.repeat_type == 'monthly' %}本月天数{% else %}7{% endif %}）</span>
+            </label>
+            <input type="number" class="form-control rm-days-count" min="1" max="{% if item.repeat_type == 'monthly' %}31{% else %}7{% endif %}" value="{{ item.random_days_count or 1 }}">
+          </div>
+          <hr style="margin:12px 0;">
+          <div class="mb-2">
+            <label class="cfg-label">朋友圈文字 <span style="font-size:11px;color:var(--muted);font-weight:400;">（选填，文字和图片至少填一项）</span></label>
+            <textarea class="form-control rm-text" rows="4" placeholder="输入朋友圈文字内容，支持换行">{{ item.text }}</textarea>
+          </div>
+          <div class="mb-2">
+            <label class="cfg-label">朋友圈图片 <span style="font-size:11px;color:var(--muted);font-weight:400;">（选填，填本地图片绝对路径，最多9张）</span></label>
+            <div class="rm-images-list">
+              {% for img in item.images %}
+              <div class="list-item">
+                <input type="text" class="form-control" name="rm_image" value="{{ img }}" placeholder="图片完整路径，如 D:\Images\1.png">
+                <button type="button" class="btn-pick-img" title="点击选择本地图片"><i class="bi bi-folder2-open"></i></button>
+                <button type="button" class="btn-rm btn-remove-item"><i class="bi bi-x-lg"></i></button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" class="btn-add btn-add-rm-image" style="margin-top:6px;"><i class="bi bi-plus-circle"></i> 添加图片路径</button>
+          </div>
+          <div class="mb-2">
+            <label class="cfg-label">可见范围</label>
+            <select class="form-select rm-privacy">
+              <option value="public"    {% if item.privacy == 'public'    %}selected{% endif %}>公开（所有人可见）</option>
+              <option value="whitelist" {% if item.privacy == 'whitelist' %}selected{% endif %}>白名单（仅标签内的人可见）</option>
+              <option value="blacklist" {% if item.privacy == 'blacklist' %}selected{% endif %}>黑名单（屏蔽标签内的人）</option>
+            </select>
+          </div>
+          <div class="mb-2 rm-tags-wrap" style="{% if item.privacy == 'public' %}display:none{% endif %}">
+            <label class="cfg-label">标签列表</label>
+            <div class="rm-tags-list">
+              {% for tag in item.tags %}
+              <div class="list-item">
+                <input type="text" class="form-control" name="rm_tag" value="{{ tag }}" placeholder="标签名称">
+                <button type="button" class="btn-rm btn-remove-item"><i class="bi bi-x-lg"></i></button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" class="btn-add btn-add-rm-tag" style="margin-top:6px;"><i class="bi bi-plus-circle"></i> 添加标签</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn-add" id="btn-add-random-moments" style="margin-top:4px;"><i class="bi bi-plus-circle"></i> 添加任务</button>
     </div>
 
     <div class="cfg-card">
@@ -1296,7 +1405,7 @@ $(function(){
 
   // ===== Remove List Item =====
   $(document).on('click','.btn-remove-item',function(){
-    $(this).closest('.list-item, .keyword-item, .scheduled-msg-item, .scheduled-moments-item').remove();
+    $(this).closest('.list-item, .keyword-item, .scheduled-msg-item, .scheduled-moments-item, .random-moments-item').remove();
   });
 
   // ===== 选择本地图片（调后端弹系统文件选择框）=====
@@ -1478,6 +1587,103 @@ $(function(){
     $('#scheduled_moments_container').append(html);
   });
 
+  // ===== Random Moments: 重复类型切换（显示/隐藏随机天数输入）=====
+  $(document).on('change','.rm-repeat-type',function(){
+    var $item=$(this).closest('.random-moments-item');
+    var v=$(this).val();
+    var $wrap=$item.find('.rm-days-wrap');
+    if(v==='daily'){
+      $wrap.hide();
+    } else {
+      $wrap.show();
+      var maxDays=(v==='weekly'?7:31);
+      var label=(v==='weekly')?'每周随机抽几天发布（1~7）':'每月随机抽几天发布（1~本月天数）';
+      $wrap.find('.rm-days-label').html(label);
+      $wrap.find('.rm-days-count').attr('max',maxDays);
+      var cur=parseInt($wrap.find('.rm-days-count').val())||1;
+      if(cur>maxDays) $wrap.find('.rm-days-count').val(maxDays);
+    }
+  });
+
+  // ===== Random Moments: 可见范围切换 =====
+  $(document).on('change','.rm-privacy',function(){
+    var wrap=$(this).closest('.random-moments-item').find('.rm-tags-wrap');
+    if($(this).val()==='public'){ wrap.hide(); } else { wrap.show(); }
+  });
+
+  // ===== Random Moments: 添加图片路径 =====
+  $(document).on('click','.btn-add-rm-image',function(){
+    var list=$(this).prev('.rm-images-list');
+    if(list.find('input[name="rm_image"]').length>=9){ alert('最多只能添加9张图片'); return; }
+    list.append(
+      '<div class="list-item">'+
+        '<input type="text" class="form-control" name="rm_image" placeholder="图片完整路径，如 D:\\Images\\1.png">'+
+        '<button type="button" class="btn-pick-img" title="点击选择本地图片"><i class="bi bi-folder2-open"></i></button>'+
+        '<button type="button" class="btn-rm btn-remove-item"><i class="bi bi-x-lg"></i></button>'+
+      '</div>'
+    );
+  });
+
+  // ===== Random Moments: 添加标签 =====
+  $(document).on('click','.btn-add-rm-tag',function(){
+    $(this).prev('.rm-tags-list').append(
+      '<div class="list-item">'+
+        '<input type="text" class="form-control" name="rm_tag" placeholder="标签名称">'+
+        '<button type="button" class="btn-rm btn-remove-item"><i class="bi bi-x-lg"></i></button>'+
+      '</div>'
+    );
+  });
+
+  // ===== Random Moments: 添加任务 =====
+  var rmIdCounter=Date.now()+2000000;
+  $('#btn-add-random-moments').click(function(){
+    rmIdCounter++;
+    var html=
+    '<div class="random-moments-item" data-rmid="'+rmIdCounter+'">'+
+      '<div class="d-flex align-items-center justify-content-between mb-3">'+
+        '<div class="switch-row" style="margin-bottom:0;flex:1">'+
+          '<input class="form-check-input rm-enabled" type="checkbox" checked>'+
+          '<label>启用此任务</label>'+
+        '</div>'+
+        '<button type="button" class="btn-rm btn-remove-item"><i class="bi bi-x-lg"></i></button>'+
+      '</div>'+
+      '<div class="row mb-2">'+
+        '<div class="col-6"><label class="cfg-label">发布时间窗口 开始</label>'+
+          '<input type="time" class="form-control rm-time-start" value="09:00"></div>'+
+        '<div class="col-6"><label class="cfg-label">发布时间窗口 结束</label>'+
+          '<input type="time" class="form-control rm-time-end" value="21:00"></div>'+
+      '</div>'+
+      '<div class="mb-2"><label class="cfg-label">重复类型</label>'+
+        '<select class="form-select rm-repeat-type">'+
+          '<option value="daily">每天</option>'+
+          '<option value="weekly">每周</option>'+
+          '<option value="monthly">每月</option>'+
+        '</select></div>'+
+      '<div class="mb-2 rm-days-wrap" style="display:none">'+
+        '<label class="cfg-label rm-days-label">每周随机抽几天发布（1~7）</label>'+
+        '<input type="number" class="form-control rm-days-count" min="1" max="7" value="1">'+
+      '</div>'+
+      '<hr style="margin:12px 0;">'+
+      '<div class="mb-2"><label class="cfg-label">朋友圈文字 <span style="font-size:11px;color:var(--muted);font-weight:400;">（文字和图片至少填一项）</span></label>'+
+        '<textarea class="form-control rm-text" rows="4" placeholder="输入朋友圈文字内容，支持换行"></textarea></div>'+
+      '<div class="mb-2"><label class="cfg-label">朋友圈图片 <span style="font-size:11px;color:var(--muted);font-weight:400;">（选填，最多9张）</span></label>'+
+        '<div class="rm-images-list"></div>'+
+        '<button type="button" class="btn-add btn-add-rm-image" style="margin-top:6px;"><i class="bi bi-plus-circle"></i> 添加图片路径</button></div>'+
+      '<div class="mb-2"><label class="cfg-label">可见范围</label>'+
+        '<select class="form-select rm-privacy">'+
+          '<option value="public">公开（所有人可见）</option>'+
+          '<option value="whitelist">白名单（仅标签内的人可见）</option>'+
+          '<option value="blacklist">黑名单（屏蔽标签内的人）</option>'+
+        '</select></div>'+
+      '<div class="mb-2 rm-tags-wrap" style="display:none">'+
+        '<label class="cfg-label">标签列表</label>'+
+        '<div class="rm-tags-list"></div>'+
+        '<button type="button" class="btn-add btn-add-rm-tag" style="margin-top:6px;"><i class="bi bi-plus-circle"></i> 添加标签</button>'+
+      '</div>'+
+    '</div>';
+    $('#random_moments_container').append(html);
+  });
+
   // ===== Add Scheduled Task =====
   var taskIdCounter=Date.now();
   $('#btn-add-scheduled-task').click(function(){
@@ -1576,6 +1782,8 @@ $(function(){
       scheduled_msg_list:[],
       scheduled_moments_switch:$('#scheduled_moments_switch').is(':checked'),
       scheduled_moments_list:[],
+      random_moments_switch:$('#random_moments_switch').is(':checked'),
+      random_moments_list:[],
       moments_like_switch:$('#moments_like_switch').is(':checked'),
       moments_like_min:Math.max(1,Math.min(1440,parseInt($('#moments_like_min').val())||60)),
       moments_like_max:Math.max(1,Math.min(1440,parseInt($('#moments_like_max').val())||120)),
@@ -1625,6 +1833,28 @@ $(function(){
           return [];
         })(),
         msgs:msgs
+      });
+    });
+    // 收集随机定时朋友圈任务列表
+    $('.random-moments-item').each(function(){
+      var $r=$(this), images=[], tags=[];
+      $r.find('input[name="rm_image"]').each(function(){ if($(this).val().trim()) images.push($(this).val().trim()); });
+      $r.find('input[name="rm_tag"]').each(function(){ if($(this).val().trim()) tags.push($(this).val().trim()); });
+      var repeatType=$r.find('.rm-repeat-type').val();
+      var daysCount=parseInt($r.find('.rm-days-count').val())||1;
+      var maxDays=(repeatType==='weekly'?7:31);
+      daysCount=Math.max(1,Math.min(maxDays,daysCount));
+      configData.random_moments_list.push({
+        id:$r.data('rmid'),
+        enabled:$r.find('.rm-enabled').is(':checked'),
+        time_start:$r.find('.rm-time-start').val()||'09:00',
+        time_end:$r.find('.rm-time-end').val()||'21:00',
+        repeat_type:repeatType,
+        random_days_count:daysCount,
+        text:$r.find('.rm-text').val(),
+        images:images,
+        privacy:$r.find('.rm-privacy').val(),
+        tags:tags
       });
     });
     // 收集定时朋友圈任务列表
@@ -1884,6 +2114,23 @@ $(function(){
         $('#dv-version').text(d.version || '-');
         $('#dv-lasttime').text(d.last_msg_time || '暂无');
         $('#dv-lastsender').text(d.last_msg_sender || '暂无');
+        // 关键词卡片
+        var kwOn = d.chat_keyword_switch || d.group_keyword_switch;
+        if(kwOn){
+          var kwParts = [];
+          if(d.chat_keyword_switch) kwParts.push('私聊');
+          if(d.group_keyword_switch) kwParts.push('群聊');
+          $('#sv-keyword').text(kwParts.join('/') + ' · ' + (d.keyword_count||0) + '个');
+        } else {
+          $('#sv-keyword').text('未启用');
+        }
+        // 记忆卡片
+        $('#sv-memory').text(d.memory_switch ? ('上下文' + (d.memory_context_count||'-') + '条') : '未启用');
+        // 回复延迟卡片
+        $('#sv-delay').text(d.reply_delay_switch ? ((d.reply_delay_min||'-') + '~' + (d.reply_delay_max||'-') + 's') : '未启用');
+        // 详情行
+        $('#dv-kw-at').text(d.group_keyword_switch ? (d.group_keyword_at_only ? '仅@触发' : '全部触发') : '-');
+        $('#dv-mem-ctx').text(d.memory_switch ? ((d.memory_context_count||'-') + ' 条') : '已关闭');
       } else {
         $('#btnRestart').hide();
         $('#topbar-notice').hide();

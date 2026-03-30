@@ -1,6 +1,6 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.6.6-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.6.7-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
@@ -239,6 +239,10 @@ python web_server.py
 #### 随机朋友圈点赞
 
 设置后会在规定的随机时间内打开朋友圈并点赞第一条，用于活跃账号。
+
+#### 随机定时朋友圈
+
+依照页面提示设置随机窗口时间发布朋友圈，防止固定时间跳过机械化。
 
 #### 定时朋友圈
 

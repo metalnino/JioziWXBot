@@ -219,6 +219,8 @@ def dashboard():
     config.setdefault('moments_like_switch', False)          # 随机朋友圈点赞开关
     config.setdefault('moments_like_min', 60)                # 随机点赞最小间隔（分钟）
     config.setdefault('moments_like_max', 120)               # 随机点赞最大间隔（分钟）
+    config.setdefault('random_moments_switch', False)        # 随机定时朋友圈开关
+    config.setdefault('random_moments_list', [])             # 随机定时朋友圈任务列表
     # 旧配置迁移：everyday_msg_dict -> scheduled_msg_list
     if not config.get('scheduled_msg_list') and config.get('everyday_msg_dict'):
         import uuid
@@ -282,6 +284,7 @@ def _coerce_bool_fields(merged_config):
         'scheduled_msg_switch',
         'scheduled_moments_switch',         # 定时朋友圈开关
         'moments_like_switch',              # 随机朋友圈点赞开关
+        'random_moments_switch',            # 随机定时朋友圈开关
         'everyday_start_stop_bot_switch',   # 新增
         'memory_switch',                    # 记忆开关
         'reply_delay_switch',               # 发送延迟开关
@@ -295,7 +298,7 @@ def _coerce_bool_fields(merged_config):
                 merged_config[field] = bool(v)
 
 def _coerce_list_fields(merged_config):
-    list_fields = ['listen_list', 'group', 'new_friend_msg', 'scheduled_msg_list', 'scheduled_moments_list']
+    list_fields = ['listen_list', 'group', 'new_friend_msg', 'scheduled_msg_list', 'scheduled_moments_list', 'random_moments_list']
     for field in list_fields:
         if field in merged_config and not isinstance(merged_config[field], list):
             if isinstance(merged_config[field], str):
@@ -834,6 +837,9 @@ def main():
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[logging.NullHandler()]
     )
+    # 屏蔽 werkzeug 的 INFO 级别访问日志（如 /get_logs、/get_status 轮询请求）
+    # WARNING 及以上（如端口冲突、路由错误）仍正常输出
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
     log('INFO', '服务器启动中...')
     try:
         if not os.path.exists(CONFIG_FILE):
@@ -865,6 +871,8 @@ def main():
                 "scheduled_msg_list": [],
                 "scheduled_moments_switch": False,
                 "scheduled_moments_list": [],
+                "random_moments_switch": False,
+                "random_moments_list": [],
                 "everyday_start_stop_bot_switch": False,
                 "everyday_start_bot_time": "08:00",
                 "everyday_stop_bot_time": "23:00",

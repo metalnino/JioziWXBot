@@ -2,8 +2,8 @@
 # Siver微信机器人 siver_wxbot - 面向对象版本 - wxautox4版本
 # 作者：https://www.siver.top
 
-version = "V4.6.6"
-version_log = "重要修复！重要更新！强烈建议所有用户更新！V4.6.6 - 修复4.6.5更新造成的群组关键词失效的问题、新增群聊关键词仅@回复开关、新增一键重启载入新配置按钮、bug修复"
+version = "V4.6.7"
+version_log = "重要修复！重要更新！强烈建议所有用户更新！V4.6.7 - 新增随机定时发布朋友圈、状态面板和/状态指令返回显示优化、新增几个管理员控制指令、bug修复"
 
 # ============================================================
 # 标准库导入
@@ -14,6 +14,7 @@ import sys
 import time
 import json
 import random
+import calendar
 import threading
 import traceback
 from datetime import datetime, timedelta
@@ -136,6 +137,10 @@ class WXBotConfig:
         self.moments_like_min    = 60     # 随机间隔最小分钟数
         self.moments_like_max    = 120    # 随机间隔最大分钟数
 
+        # ---------- 随机定时朋友圈配置 ----------
+        self.random_moments_switch = False  # 随机定时朋友圈总开关
+        self.random_moments_list   = []     # 随机定时朋友圈任务列表
+
         # ---------- 对话记忆配置 ----------
         self.memory_switch        = True     # 记忆开关（默认开启）
         self.memory_max_count     = 500      # 单窗口最多存储条数
@@ -204,6 +209,8 @@ class WXBotConfig:
                     "moments_like_switch": False,
                     "moments_like_min": 60,
                     "moments_like_max": 120,
+                    "random_moments_switch": False,
+                    "random_moments_list": [],
                     "everyday_start_stop_bot_switch": False,
                     "everyday_start_bot_time": "08:00",
                     "everyday_stop_bot_time": "23:00",
@@ -318,6 +325,10 @@ class WXBotConfig:
         self.moments_like_switch = self.config.get('moments_like_switch', False)
         self.moments_like_min    = max(1,    int(self.config.get('moments_like_min', 60)))
         self.moments_like_max    = max(self.moments_like_min, int(self.config.get('moments_like_max', 120)))
+
+        # 随机定时朋友圈配置
+        self.random_moments_switch = self.config.get('random_moments_switch', False)
+        self.random_moments_list   = self.config.get('random_moments_list', [])
 
         # 旧配置自动迁移：everyday_msg_dict -> scheduled_msg_list
         if not self.scheduled_msg_list and self.config.get('everyday_msg_dict'):
@@ -986,7 +997,8 @@ class WXBot:
         self.api_cache = {}                     # 群组专属接口缓存 {api_index: api_instance}
 
         self.wx                  = None         # WeChat 客户端对象（延迟初始化）
-        self._moments_like_next_time = None     # 下次随机朋友圈点赞的触发时间（datetime 或 None）
+        self._moments_like_next_time  = None    # 下次随机朋友圈点赞的触发时间（datetime 或 None）
+        self._random_moments_state    = {}     # 随机定时朋友圈运行状态缓存 {task_id: state_dict}
         self.memory_manager      = None         # 记忆管理器（init_wx_listeners 时创建）
         self.all_Mode_listen_list = []           # 全局模式下的动态监听列表，元素格式：[昵称, 最新消息时间戳]
         self.start_time          = datetime.now()
@@ -1452,6 +1464,116 @@ class WXBot:
             except Exception:
                 pass
 
+    def _check_random_moments(self):
+        """
+        随机定时朋友圈调度检查。
+        在 main() 主循环中每轮调用，按任务配置决定今天是否发布、何时发布。
+
+        每周模式：每周初随机抽取 random_days_count 天（缓存一整周）。
+        每月模式：每月初随机抽取 random_days_count 天（缓存一整月）。
+        每日模式：每天必发。
+        确定今天发布后，在 [time_start, time_end] 窗口内随机选一个时刻触发。
+        """
+        now   = datetime.now()
+        today = now.date()
+
+        for task in self.config.random_moments_list:
+            if not task.get('enabled', True):
+                continue
+            task_id = task.get('id', '')
+            if not task_id:
+                continue
+
+            # 初始化 / 取出该任务的运行时状态
+            state = self._random_moments_state.setdefault(task_id, {
+                'next_fire':    None,   # 今天计划触发的 datetime
+                'last_fire_date': None, # 上次实际触发的 date
+                'week_cache':   None,   # {'key': (year, week), 'days': [...]}
+                'month_cache':  None,   # {'key': (year, month), 'days': [...]}
+            })
+
+            # --- 判断今天是否是发送日 ---
+            repeat_type       = task.get('repeat_type', 'daily')
+            random_days_count = max(1, int(task.get('random_days_count', 1)))
+            is_eligible       = False
+
+            if repeat_type == 'daily':
+                is_eligible = True
+
+            elif repeat_type == 'weekly':
+                iso = today.isocalendar()
+                week_key = (iso[0], iso[1])
+                if state['week_cache'] is None or state['week_cache']['key'] != week_key:
+                    n        = min(random_days_count, 7)
+                    selected = sorted(random.sample(range(1, 8), n))
+                    state['week_cache'] = {'key': week_key, 'days': selected}
+                    log(message=f"随机朋友圈 {task_id}：本周 {week_key} 随机发送日 {selected}")
+                is_eligible = today.isoweekday() in state['week_cache']['days']
+
+            elif repeat_type == 'monthly':
+                month_key = (today.year, today.month)
+                if state['month_cache'] is None or state['month_cache']['key'] != month_key:
+                    days_in_month = calendar.monthrange(today.year, today.month)[1]
+                    n        = min(random_days_count, days_in_month)
+                    selected = sorted(random.sample(range(1, days_in_month + 1), n))
+                    state['month_cache'] = {'key': month_key, 'days': selected}
+                    log(message=f"随机朋友圈 {task_id}：本月 {month_key} 随机发送日 {selected}")
+                is_eligible = today.day in state['month_cache']['days']
+
+            if not is_eligible:
+                # 今天不是发送日，若 next_fire 是今天的则清掉
+                if state['next_fire'] is not None and state['next_fire'].date() == today:
+                    state['next_fire'] = None
+                continue
+
+            # 今天已发送过，跳过
+            if state['last_fire_date'] == today:
+                continue
+
+            # --- 还没计算今天的触发时间，则随机生成一个 ---
+            if state['next_fire'] is None:
+                time_start = task.get('time_start', '00:00')
+                time_end   = task.get('time_end',   '23:59')
+                try:
+                    h_s, m_s   = map(int, time_start.split(':'))
+                    h_e, m_e   = map(int, time_end.split(':'))
+                    start_mins = h_s * 60 + m_s
+                    end_mins   = h_e * 60 + m_e
+                    if start_mins >= end_mins:
+                        end_mins = start_mins + 1
+                    fire_mins  = random.randint(start_mins, end_mins)
+                    fire_h, fire_m = divmod(fire_mins, 60)
+                    fire_dt    = now.replace(hour=fire_h, minute=fire_m,
+                                            second=random.randint(0, 59), microsecond=0)
+                    # 若随机时刻已过，则今天在当前时刻后 10 秒触发（避免错过）
+                    if fire_dt <= now:
+                        fire_dt = now + timedelta(seconds=10)
+                    state['next_fire'] = fire_dt
+                    log(message=f"随机朋友圈 {task_id}：今天计划于 {fire_dt.strftime('%H:%M:%S')} 发布")
+                except Exception as ex:
+                    log(level="ERROR", message=f"随机朋友圈 {task_id} 时间解析失败：{ex}")
+                    continue
+
+            # --- 到时间了，执行发布 ---
+            if now >= state['next_fire']:
+                log(message=f"随机朋友圈 {task_id}：触发发布...")
+                try:
+                    self.send_scheduled_moments(
+                        text        = task.get('text', ''),
+                        images      = task.get('images', []),
+                        privacy     = task.get('privacy', 'public'),
+                        tags        = task.get('tags', []),
+                        repeat_type = 'daily',   # 已判断过资格，传 daily 跳过内部日期二次校验
+                        weekdays    = [],
+                        dates       = [],
+                        task_id     = '',        # 空 id 避免 once 自动禁用逻辑
+                    )
+                    state['last_fire_date'] = today
+                except Exception as ex:
+                    log(level="ERROR", message=f"随机朋友圈 {task_id} 发布失败：{ex}")
+                finally:
+                    state['next_fire'] = None
+
     # ----------------------------------------------------------
     # 消息回调与处理入口
     # ----------------------------------------------------------
@@ -1723,6 +1845,50 @@ class WXBot:
             result = self.send_command_list(chat)
         elif content == "/状态":
             result = self._build_status_msg(chat, message)
+        elif content == "/关键词状态":
+            priv = "开启" if self.config.chat_keyword_switch else "关闭"
+            grp  = "开启" if self.config.group_keyword_switch else "关闭"
+            at   = "是"   if self.config.group_keyword_at_only else "否"
+            cnt  = len(self.config.keyword_dict)
+            keys = ", ".join(self.config.keyword_dict.keys()) if self.config.keyword_dict else "（无）"
+            result = chat.SendMsg(
+                f"私聊关键词：{priv}\n"
+                f"群聊关键词：{grp}\n"
+                f"群聊仅@触发：{at}\n"
+                f"关键词数量：{cnt} 个\n"
+                f"关键词列表：{keys}"
+            )
+        elif content == "/开启群聊关键词@触发":
+            self.config.set_config('group_keyword_at_only', True)
+            result = chat.SendMsg("群聊关键词已设为：仅被@时触发")
+        elif content == "/关闭群聊关键词@触发":
+            self.config.set_config('group_keyword_at_only', False)
+            result = chat.SendMsg("群聊关键词已设为：无论是否@均触发")
+        elif content == "/记忆状态":
+            sw  = "开启" if self.config.memory_switch else "关闭"
+            result = chat.SendMsg(
+                f"对话记忆：{sw}\n"
+                f"上下文条数：{self.config.memory_context_count} 条\n"
+                f"最大存储：{self.config.memory_max_count} 条"
+            )
+        elif content == "/开启记忆":
+            self.config.set_config('memory_switch', True)
+            result = chat.SendMsg("对话记忆已开启")
+        elif content == "/关闭记忆":
+            self.config.set_config('memory_switch', False)
+            result = chat.SendMsg("对话记忆已关闭")
+        elif content == "/回复延迟状态":
+            sw = "开启" if self.config.reply_delay_switch else "关闭"
+            result = chat.SendMsg(
+                f"回复延迟：{sw}\n"
+                f"延迟范围：{self.config.reply_delay_min}~{self.config.reply_delay_max}s"
+            )
+        elif content == "/开启回复延迟":
+            self.config.set_config('reply_delay_switch', True)
+            result = chat.SendMsg(f"回复延迟已开启（{self.config.reply_delay_min}~{self.config.reply_delay_max}s）")
+        elif content == "/关闭回复延迟":
+            self.config.set_config('reply_delay_switch', False)
+            result = chat.SendMsg("回复延迟已关闭")
         elif content.startswith("/接口测试"):
             message_re = message
             message_re.content = re.sub("/接口测试", "", message.content).strip()
@@ -1770,7 +1936,25 @@ class WXBot:
         # 关键词回复状态
         send_msg += "当前私聊关键词回复状态：" + ("开启\n" if self.config.chat_keyword_switch else "关闭\n")
         send_msg += "当前群聊关键词回复状态：" + ("开启\n" if self.config.group_keyword_switch else "关闭\n")
-        send_msg += "当前关键词：" + ", ".join(self.config.keyword_dict.keys()) + "\n"
+        if self.config.group_keyword_switch:
+            send_msg += "群聊关键词仅@触发：" + ("是\n" if self.config.group_keyword_at_only else "否\n")
+        send_msg += f"关键词数量：{len(self.config.keyword_dict)} 个\n"
+        if self.config.keyword_dict:
+            send_msg += "当前关键词：" + ", ".join(self.config.keyword_dict.keys()) + "\n"
+
+        # 对话记忆状态
+        send_msg += "对话记忆：" + ("开启" if self.config.memory_switch else "关闭")
+        if self.config.memory_switch:
+            send_msg += f"  上下文条数：{self.config.memory_context_count}\n"
+        else:
+            send_msg += "\n"
+
+        # 回复延迟状态
+        send_msg += "回复延迟：" + ("开启" if self.config.reply_delay_switch else "关闭")
+        if self.config.reply_delay_switch:
+            send_msg += f"  延迟范围：{self.config.reply_delay_min}~{self.config.reply_delay_max}s\n"
+        else:
+            send_msg += "\n"
 
         # 定时消息状态
         send_msg += "当前定时消息状态：" + ("开启\n" if self.config.scheduled_msg_switch else "关闭\n")
@@ -1931,29 +2115,39 @@ class WXBot:
         """发送全量指令帮助列表"""
         commands = (
             '指令列表[发送中括号里内容]：\n'
-            '[/状态]\n'
-            '[/接口测试]'
-            '[/当前用户] (返回当前监听用户列表)\n'
-            '[/添加用户***] （将用户***添加进监听列表）\n'
-            '[/删除用户***]\n'
-            '[/当前群]\n'
-            '[/添加群***] \n'
-            '[/删除群***] \n'
-            '[/开启群机器人]\n'
-            '[/关闭群机器人]\n'
+            '--- 系统状态 ---\n'
+            '[/状态] 完整运行状态摘要\n'
+            '[/接口测试 内容] 测试当前AI接口\n'
+            '[/当前版本] 版本号及更新说明\n'
+            '[/更新配置] 重载配置并重初始化监听\n'
+            '--- 用户管理 ---\n'
+            '[/当前用户] 当前监听用户列表\n'
+            '[/添加用户***] 添加监听用户\n'
+            '[/删除用户***] 移除监听用户\n'
+            '--- 群组管理 ---\n'
+            '[/当前群] 当前监听群列表\n'
+            '[/添加群***] / [/删除群***]\n'
+            '[/开启群机器人] / [/关闭群机器人]\n'
             '[/群机器人状态]\n'
-            '[/开启群机器人欢迎语]\n'
-            '[/关闭群机器人欢迎语]\n'
+            '[/开启群机器人欢迎语] / [/关闭群机器人欢迎语]\n'
             '[/群机器人欢迎语状态]\n'
             '[/当前群机器人欢迎语]\n'
             '[/更改群机器人欢迎语为***]\n'
-            '[/查看接口列表] （返回所有接口配置）\n'
-            '[/选择接口 N] （切换至第 N 个接口，如：/选择接口 2）\n'
-            '[/当前AI设定] （返回当前AI设定）\n'
-            '[/更改AI设定为***] （更改AI设定，***为AI设定）\n'
-            '[/更新配置] （若在程序运行时修改过配置，请发送此指令以更新配置）\n'
-            '[/当前版本] (返回当前版本)\n'
-            '作者:https://www.siver.top  若有非法传播请告知'
+            '--- 关键词回复 ---\n'
+            '[/关键词状态] 查看关键词配置及列表\n'
+            '[/开启群聊关键词@触发] / [/关闭群聊关键词@触发]\n'
+            '--- 对话记忆 ---\n'
+            '[/记忆状态] 查看记忆配置\n'
+            '[/开启记忆] / [/关闭记忆]\n'
+            '--- 回复延迟 ---\n'
+            '[/回复延迟状态] 查看回复延迟配置\n'
+            '[/开启回复延迟] / [/关闭回复延迟]\n'
+            '--- AI接口 ---\n'
+            '[/查看接口列表] 返回所有接口配置\n'
+            '[/选择接口 N] 切换至第N个接口\n'
+            '[/当前AI设定] 返回当前AI提示词\n'
+            '[/更改AI设定为***] 修改AI提示词\n'
+            '作者:https://www.siver.top'
         )
         return chat.SendMsg(commands)
 
@@ -2312,6 +2506,15 @@ class WXBot:
             "callback_is_die":    self.callback_is_die,
             "scheduled_switch":   self.config.scheduled_msg_switch,
             "scheduled_count":    scheduled_enabled,
+            "chat_keyword_switch":   self.config.chat_keyword_switch,
+            "group_keyword_switch":  self.config.group_keyword_switch,
+            "group_keyword_at_only": self.config.group_keyword_at_only,
+            "keyword_count":         len(self.config.keyword_dict),
+            "memory_switch":         self.config.memory_switch,
+            "memory_context_count":  self.config.memory_context_count,
+            "reply_delay_switch":    self.config.reply_delay_switch,
+            "reply_delay_min":       self.config.reply_delay_min,
+            "reply_delay_max":       self.config.reply_delay_max,
         }
 
     def stop_wxbot(self):
@@ -2416,6 +2619,15 @@ class WXBot:
                 # ---- 定时任务执行（定时消息 / 定时朋友圈）----
                 if self.config.scheduled_msg_switch or self.config.scheduled_moments_switch:
                     schedule.run_pending()
+
+                # ---- 随机定时朋友圈模块 ----
+                if self.config.random_moments_switch:
+                    try:
+                        self._check_random_moments()
+                    except Exception as e:
+                        log(level="ERROR", message=f"随机定时朋友圈模块出错：{e}")
+                else:
+                    self._random_moments_state = {}  # 开关关闭时清空缓存
 
                 # ---- 随机朋友圈点赞模块 ----
                 if self.config.moments_like_switch:
