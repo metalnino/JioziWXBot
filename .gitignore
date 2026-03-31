@@ -25,6 +25,7 @@ panel_logs/
 memory/
 backup/
 wxautox文件下载/
+old_wxbot_config/
 
 *.zip
 *.whl

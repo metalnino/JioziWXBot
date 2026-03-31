@@ -2,8 +2,8 @@
 # Siver微信机器人 siver_wxbot - 面向对象版本 - wxautox4版本
 # 作者：https://www.siver.top
 
-version = "V4.6.10"
-version_log = "V4.6.10 - 分离prompt 现在可添加多个prompt每个白名单和群组监听都能独立设置prompt和接口、新增自定义规则转发功能、优化首次启动日志提示、优化群组上下文记忆带入发送人、bug修复"
+version = "V4.7.01"
+version_log = "V4.7.01 - 分离prompt 现在可添加多个prompt每个白名单和群组监听都能独立设置prompt和接口、新增自定义规则转发功能、优化首次启动日志提示、优化群组上下文记忆带入发送人、新增自动，手动备份配置数据、bug修复"
 
 # ============================================================
 # 标准库导入
@@ -269,18 +269,17 @@ class WXBotConfig:
     def init_prompt_dir(self):
         """确保 prompt 目录存在；迁移旧 prompt 字段；空目录时写入默认 prompt"""
         os.makedirs(self.prompt_dir, exist_ok=True)
-        # 迁移旧 prompt 字段
+        # 迁移旧 prompt 字段：先写文件，成功后才删字段并保存，防止写入失败时数据丢失
         if 'prompt' in self.config:
             target = os.path.join(self.prompt_dir, '默认.md')
-            if not os.path.exists(target):
-                try:
-                    with open(target, 'w', encoding='utf-8') as f:
-                        f.write(self.config['prompt'])
-                except Exception as e:
-                    log(level="ERROR", message=f"迁移 prompt 到文件失败: {e}")
-            del self.config['prompt']
-            self.save_config()
-            log(message="已将旧 prompt 字段迁移至 config/prompt/默认.md")
+            try:
+                with open(target, 'w', encoding='utf-8') as f:
+                    f.write(self.config['prompt'])
+                del self.config['prompt']
+                self.save_config()
+                log(message="已将旧 prompt 字段迁移至 config/prompt/默认.md")
+            except Exception as e:
+                log(level="ERROR", message=f"迁移 prompt 到文件失败: {e}，旧 prompt 字段已保留")
         # 空目录兜底
         try:
             md_files = [f for f in os.listdir(self.prompt_dir) if f.endswith('.md')]
@@ -1761,21 +1760,24 @@ class WXBot:
                 _is_group = chat.who in self.config.group
                 _img_enabled = (self.config.group_image_recognition_switch if _is_group
                                 else self.config.chat_image_recognition_switch)
-                if msg.type == 'image':
-                    if _img_enabled:
-                        _down_path = msg.download()
-                        if _down_path:
-                            msg.content = str(_down_path)
-                        else:
-                            log("ERROR", f"{_down_path}")
-                            log("ERROR", "message_handle_callback下载图片出错")
-                if msg.type == 'quote':
-                    if _img_enabled:
-                        _down_path = msg.download_quote_image()
-                        if _down_path:
-                            msg.content = msg.content+"+引用的图片:"+str(_down_path)
-                        else:
-                            log("INFO", "引用内容不是图片或视频")
+                try:
+                    if msg.type == 'image':
+                        if _img_enabled:
+                            _down_path = msg.download()
+                            if _down_path:
+                                msg.content = str(_down_path)
+                            else:
+                                log("ERROR", f"{_down_path}")
+                                log("ERROR", "message_handle_callback下载图片出错")
+                    if msg.type == 'quote':
+                        if _img_enabled:
+                            _down_path = msg.download_quote_image()
+                            if _down_path:
+                                msg.content = msg.content+"+引用的图片:"+str(_down_path)
+                            else:
+                                log("INFO", "引用内容不是图片或视频")
+                except Exception as e:
+                    log(level="ERROR", message=f"message_handle_callback下载图片出错,请尝试将windows设置屏幕缩放设置为100%后再尝试: {e}")
                 # 统计已接收消息数
                 self.msg_received_count += 1
                 self.last_msg_time   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2741,20 +2743,23 @@ class WXBot:
                 log(message=f'收到消息：{msg.sender}: {msg.content}')
                 # Next回调即为私聊
                 _any_img_enabled = (self.config.chat_image_recognition_switch)
-                if msg.type == 'image':
-                    if _any_img_enabled:
-                        _path = msg.download()
-                        if _path:
-                            Next_callback_down_map[msg.id] = _path
-                        else:
-                            log("ERR", "Next_callback下载图片出错")
-                if msg.type == 'quote':
-                    if _any_img_enabled:
-                        _path = msg.download_quote_image()
-                        if _path:
-                            Next_callback_down_map[msg.id] = _path
-                        else:
-                            log("INFO", "引用内容不是图片或视频")
+                try:
+                    if msg.type == 'image':
+                        if _any_img_enabled:
+                            _path = msg.download()
+                            if _path:
+                                Next_callback_down_map[msg.id] = _path
+                            else:
+                                log("ERROR", "Next_callback下载图片出错，请尝试将windows屏幕设置的缩放调整为100%后重试")
+                    if msg.type == 'quote':
+                        if _any_img_enabled:
+                            _path = msg.download_quote_image()
+                            if _path:
+                                Next_callback_down_map[msg.id] = _path
+                            else:
+                                log("INFO", "引用内容不是图片或视频")
+                except Exception as e:
+                    log(level="ERROR", message=f"Next_callback下载图片出错，请尝试将windows屏幕设置的缩放调整为100%后重试: {e}")
             
             messages_new = self.wx.GetNextNewMessage(filter_mute=False, callback=Next_callback)
             chat      = messages_new.get('chat_name')

@@ -9,12 +9,13 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import json
 import os
+import shutil
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 import logging
 from functools import wraps
 import threading
-from wxbot_core import WXBot
+from wxbot_core import WXBot, version as BOT_VERSION
 from logger import log
 import logger
 import pythoncom
@@ -58,6 +59,7 @@ CONFIG_FILE = os.path.join(base_dir(), 'config', 'config.json')
 ADMIN_FILE  = os.path.join(base_dir(), 'config', 'admin.json')
 EMAIL_FILE  = os.path.join(base_dir(), 'config', 'email.txt')
 PROMPT_DIR  = os.path.join(base_dir(), 'config', 'prompt')
+BACKUP_BASE = os.path.join(base_dir(), 'old_wxbot_config')
 DEFAULT_PROMPT_CONTENT = "你是一个ai回复助手，请根据用户的问题给出回答,回复尽量保持在30字以内"
 
 # 启动时确保目录存在
@@ -163,20 +165,117 @@ def _get_prompts_list():
     return prompts
 
 def _migrate_prompt_from_config(config):
-    """若 config dict 中存在旧 prompt 字段，迁移到 默认.md，返回 True 表示需要写回"""
+    """若 config dict 中存在旧 prompt 字段，迁移到 默认.md，返回 True 表示需要写回。
+    注意：不在迁移前调用 _ensure_prompt_dir()，避免其提前创建空白默认文件
+    导致旧 prompt 内容被跳过而永久丢失。"""
     if 'prompt' not in config:
         return False
-    _ensure_prompt_dir()
+    os.makedirs(PROMPT_DIR, exist_ok=True)  # 只建目录，不创建任何默认文件
     target = os.path.join(PROMPT_DIR, '默认.md')
-    if not os.path.exists(target):
+    try:
+        with open(target, 'w', encoding='utf-8') as f:
+            f.write(config['prompt'])
+        log('SUCCESS', '旧 prompt 字段已迁移至 config/prompt/默认.md')
+        del config['prompt']   # 只有写入成功才删除字段，防止数据丢失
+        return True
+    except Exception as e:
+        log('ERROR', f'迁移 prompt 文件失败: {e}，旧 prompt 字段已保留')
+        return False
+
+# ----------------------------------------------------------
+# 数据备份辅助函数
+# ----------------------------------------------------------
+
+def _do_backup():
+    """
+    执行一次完整数据备份：
+      - 将 config/ 和 memory/ 复制到 old_wxbot_config/<时间戳>/
+      - 在时间戳目录内创建以当前版本号命名的空标记文件（如 V4.6.10）
+    返回备份目录的绝对路径。
+    """
+    ts = datetime.now().strftime('%Y%m%d%H%M%S')
+    backup_dir = os.path.join(BACKUP_BASE, ts)
+    os.makedirs(backup_dir, exist_ok=True)
+
+    config_src = os.path.join(base_dir(), 'config')
+    memory_src = os.path.join(base_dir(), 'memory')
+
+    if os.path.exists(config_src):
+        shutil.copytree(config_src, os.path.join(backup_dir, 'config'))
+    if os.path.exists(memory_src):
+        shutil.copytree(memory_src, os.path.join(backup_dir, 'memory'))
+
+    # 创建版本号标记文件（空文件，文件名即版本号）
+    version_marker = os.path.join(backup_dir, BOT_VERSION)
+    try:
+        open(version_marker, 'w').close()
+    except Exception:
+        pass
+
+    log('SUCCESS', f'数据已备份至: {backup_dir}')
+    return backup_dir
+
+
+def _check_and_auto_backup():
+    """
+    启动时自动检查并决定是否需要备份：
+      - 首次运行（old_wxbot_config 不存在）且存在 config/ 或 memory/ → 立即备份
+      - 已有备份但最新一次距今超过 3 天 → 自动备份
+      - 最新备份的版本号标记文件与当前版本不一致 → 自动备份
+    """
+    config_src = os.path.join(base_dir(), 'config')
+    memory_src = os.path.join(base_dir(), 'memory')
+    has_data = os.path.exists(config_src) or os.path.exists(memory_src)
+    if not has_data:
+        return  # 没有任何数据，无需备份
+
+    if not os.path.exists(BACKUP_BASE):
+        log('INFO', '首次检测到数据目录，自动备份中...')
+        _do_backup()
+        return
+
+    # 找所有格式为 14 位纯数字的备份目录（YYYYMMDDHHmmss）
+    try:
+        backups = [
+            d for d in os.listdir(BACKUP_BASE)
+            if os.path.isdir(os.path.join(BACKUP_BASE, d))
+            and len(d) == 14 and d.isdigit()
+        ]
+    except Exception:
+        backups = []
+
+    if not backups:
+        log('INFO', '备份目录为空，执行首次自动备份...')
+        _do_backup()
+        return
+
+    latest = max(backups)  # 字典序最大即最新时间戳
+
+    # 判断距上次备份天数
+    try:
+        latest_dt = datetime.strptime(latest, '%Y%m%d%H%M%S')
+        days_diff = (datetime.now() - latest_dt).days
+    except Exception:
+        days_diff = 999  # 解析失败时强制备份
+
+    # 判断最新备份是否包含当前版本号标记文件
+    latest_path = os.path.join(BACKUP_BASE, latest)
+    version_match = os.path.exists(os.path.join(latest_path, BOT_VERSION))
+
+    if days_diff > 3:
+        log('INFO', f'距上次备份已 {days_diff} 天（超过3天），自动备份中...')
+        _do_backup()
+    elif not version_match:
+        # 找出实际存储的旧版本号（遍历目录内不含 / 的文件）
         try:
-            with open(target, 'w', encoding='utf-8') as f:
-                f.write(config['prompt'])
-            log('SUCCESS', '旧 prompt 字段已迁移至 config/prompt/默认.md')
-        except Exception as e:
-            log('ERROR', f'迁移 prompt 文件失败: {e}')
-    del config['prompt']
-    return True
+            old_ver_files = [f for f in os.listdir(latest_path)
+                             if os.path.isfile(os.path.join(latest_path, f))
+                             and f.startswith('V')]
+            old_ver = old_ver_files[0] if old_ver_files else '未知版本'
+        except Exception:
+            old_ver = '未知版本'
+        log('INFO', f'检测到版本变更（{old_ver} → {BOT_VERSION}），自动备份中...')
+        _do_backup()
 
 # 读取配置文件
 def read_config():
@@ -837,7 +936,6 @@ def save_email_config():
         log('ERROR', f'保存邮件配置失败: {e}')
         return jsonify({'status': 'error', 'message': str(e)})
 
-import shutil
 import threading
 
 _tk_lock = threading.Lock()  # 确保同一时刻只弹一个文件选择框
@@ -877,6 +975,17 @@ def pick_image_file():
         return jsonify({'status': 'error', 'message': str(e)})
 
 MEMORY_BASE = os.path.join(base_dir(), 'memory')
+
+@app.route('/api/backup_now', methods=['POST'])
+@login_required
+def backup_now():
+    """立即执行一次数据备份，返回备份路径"""
+    try:
+        path = _do_backup()
+        return jsonify({'status': 'success', 'message': '备份成功！', 'path': path})
+    except Exception as e:
+        log('ERROR', f'手动备份失败: {e}')
+        return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/memory/list')
 @login_required
@@ -1100,6 +1209,11 @@ def main():
                 json.dump(default_config, f, ensure_ascii=False, indent=4)
             log('WARNING', '配置文件不存在，已创建默认配置文件')
         log('INFO', '服务5s后启动')
+        # 启动时自动备份检查
+        try:
+            _check_and_auto_backup()
+        except Exception as _backup_e:
+            log('ERROR', f'自动备份检查失败: {_backup_e}')
         # 动态选择端口
         free_port = find_free_port(10001, 11000)
         log('INFO', f'请访问 http://localhost:{free_port} 或者 http://127.0.0.1:{free_port} 进行登录')

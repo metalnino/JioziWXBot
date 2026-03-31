@@ -271,6 +271,8 @@ body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "S
   <div class="nav-item"><a class="nav-link" data-tab="tab-other"><i class="bi bi-sliders"></i> 其他配置</a></div>
   <div class="nav-item"><a class="nav-link" data-tab="tab-account"><i class="bi bi-person-gear"></i> 账号密码</a></div>
   <div class="nav-item"><a class="nav-link" data-tab="tab-email"><i class="bi bi-envelope-at"></i> 报错邮箱</a></div>
+  <div class="nav-divider"></div>
+  <div class="nav-item"><a class="nav-link" data-tab="tab-backup"><i class="bi bi-shield-check"></i> 数据备份</a></div>
 </nav>
 
 <!-- ===== Main ===== -->
@@ -1371,6 +1373,28 @@ body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "S
           <div id="memory-msg-container"></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ===== Tab: Backup ===== -->
+  <div class="config-panel" id="tab-backup">
+    <div class="cfg-card">
+      <div class="cfg-card-header">
+        <i class="bi bi-shield-check"></i>
+        <h5>数据备份</h5>
+        <span class="desc">将 config/ 和 memory/ 完整备份到 old_wxbot_config/ 目录</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:12px 14px;margin-bottom:20px;">
+        <i class="bi bi-info-circle-fill" style="color:#3B82F6;font-size:16px;flex-shrink:0;margin-top:1px;"></i>
+        <div style="font-size:12.5px;color:#1E3A5F;line-height:1.8;">
+          每次备份将把 <code>config/</code> 和 <code>memory/</code> 文件夹完整复制到 <code>old_wxbot_config/时间戳/</code> 目录中，并在其中创建以当前版本号命名的空标记文件。<br>
+          <strong>自动备份规则：</strong>首次运行自动备份；距上次备份超过 3 天自动备份；检测到版本更新时自动备份。
+        </div>
+      </div>
+      <button type="button" id="btnBackupNow" class="btn btn-save" style="min-width:150px;font-size:14px;">
+        <i class="bi bi-cloud-arrow-up"></i> 立即备份
+      </button>
+      <div id="backupResult" style="margin-top:14px;display:none;"></div>
     </div>
   </div>
 
@@ -2544,7 +2568,7 @@ $(function(){
         $('#update-retry-hint').text('');
         $('#update-checking').hide();
         var now = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
-        $('#update-last-check').text('上次检查：' + now);
+        $('#update-last-check').text('上次检查：' + now + '　每6小时自动检查');
         if (res.status !== 'success') { $('#update-error').show(); return; }
 
         var latest  = (res.data.version || '').trim();
@@ -2658,6 +2682,7 @@ $(function(){
   refreshStatus();
   setInterval(refreshStatus, 5000);
   checkUpdate(false); // 页面加载时自动检查一次
+  setInterval(function(){ checkUpdate(false); }, 6 * 60 * 60 * 1000); // 每 6 小时自动检查一次
 
   // ===== Account Panel =====
   // 进入 tab 时加载当前用户名
@@ -3023,6 +3048,44 @@ $('#activate-dialog-submit').on('click', function() {
 });
 $('#activate-code-input').on('keydown', function(e) {
   if (e.key === 'Enter') $('#activate-dialog-submit').click();
+});
+
+// ===== 数据备份 =====
+$('#btnBackupNow').on('click', function(){
+  var $btn = $(this);
+  var $result = $('#backupResult');
+  $btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 备份中...');
+  $result.hide();
+  $.ajax({
+    url: '/api/backup_now',
+    type: 'POST',
+    success: function(res){
+      if(res.status === 'success'){
+        $result.show().html(
+          '<div style="background:#F0FDF4;border:1px solid #BBF7D0;color:#166534;padding:12px 16px;border-radius:8px;font-size:13.5px;line-height:1.8;">' +
+          '<i class="bi bi-check-circle-fill" style="margin-right:6px;"></i><strong>' + res.message + '</strong><br>' +
+          '<span style="color:#6B7280;font-size:12.5px;">备份路径：' + res.path + '</span>' +
+          '</div>'
+        );
+      } else {
+        $result.show().html(
+          '<div style="background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;padding:12px 16px;border-radius:8px;font-size:13.5px;">' +
+          '<i class="bi bi-x-circle-fill" style="margin-right:6px;"></i>' + (res.message || '备份失败，请重试') +
+          '</div>'
+        );
+      }
+    },
+    error: function(){
+      $result.show().html(
+        '<div style="background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;padding:12px 16px;border-radius:8px;font-size:13.5px;">' +
+        '<i class="bi bi-x-circle-fill" style="margin-right:6px;"></i>请求失败，请重试' +
+        '</div>'
+      );
+    },
+    complete: function(){
+      $btn.prop('disabled', false).html('<i class="bi bi-cloud-arrow-up"></i> 立即备份');
+    }
+  });
 });
 </script>
 </body>

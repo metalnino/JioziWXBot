@@ -1,6 +1,6 @@
 # 🤖 Siver WX机器人 (wxbot_plus)
 
-[![Version](https://img.shields.io/badge/version-V4.6.10-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
+[![Version](https://img.shields.io/badge/version-V4.7.01-blue.svg)](https://github.com/SiverKing/SiverWXbot_plus)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
@@ -300,6 +300,12 @@ python web_server.py
 ### 报错邮箱
 
 提供报错邮件和 wx 离线邮件提醒，按照页面提示配置邮箱即可。
+
+---
+
+### 数据备份
+
+可备份配置数据
 
 ---
 
