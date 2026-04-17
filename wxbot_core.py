@@ -2,8 +2,8 @@
 # Siver微信机器人 siver_wxbot - 面向对象版本 - wxautox4版本
 # 作者：https://www.siver.top
 
-version = "V4.7.14"
-version_log = "V4.7.14 - 适配最新客户端4.1.8.107、修复定时启停bug"
+version = "V4.7.15"
+version_log = "V4.7.15 - 适配最新客户端、优化拆分回复、优化记忆存储、优化自定义转发"
 
 # ============================================================
 # 标准库导入
@@ -96,6 +96,7 @@ SPLIT_PROMPT_TEMPLATE = """\
 
 若无需拆分则正常回复，不要添加任何分隔符。
 严禁在正文内容中出现 ||SPLIT|| 字样。
+如果你想分条回复，一定一定一定要在每个分条直接加上这个分隔符||SPLIT||，不然程序无法处理分条发送
 【以下是你的角色设定】
 {base_prompt}"""
 
@@ -657,11 +658,63 @@ class MemoryManager:
         os.makedirs(dir_path, exist_ok=True)
         return os.path.join(dir_path, f"{chat_name}_memory.json")
 
-    def save_message(self, chat_name, sender, content, msg_type, msg_attr, max_count):
+    @staticmethod
+    def _normalize_message_time(message_time=None):
+        """将外部传入的时间统一转成记忆文件使用的字符串格式。"""
+        if isinstance(message_time, datetime):
+            return message_time.strftime("%Y/%m/%d %H:%M:%S")
+        if isinstance(message_time, str):
+            message_time = message_time.strip()
+            if message_time:
+                return message_time
+        return datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+
+    @staticmethod
+    def _parse_message_time(message_time):
+        """解析记忆时间字符串；解析失败时返回 None，避免影响主流程。"""
+        if not message_time:
+            return None
+        try:
+            return datetime.strptime(str(message_time), "%Y/%m/%d %H:%M:%S")
+        except Exception:
+            return None
+
+    def _append_message_in_order(self, messages, entry, recent_count=5):
+        """在最近 recent_count 条范围内按时间插入，修正回调并发导致的乱序写入。"""
+        current_dt = self._parse_message_time(entry.get("time"))
+        if current_dt is None or not messages:
+            messages.append(entry)
+            return messages
+
+        recent_start = max(0, len(messages) - recent_count)
+        recent_messages = messages[recent_start:]
+        has_later_recent = False
+        for item in recent_messages:
+            item_dt = self._parse_message_time(item.get("time"))
+            if item_dt and item_dt > current_dt:
+                has_later_recent = True
+                break
+
+        if not has_later_recent:
+            messages.append(entry)
+            return messages
+
+        # 只重排尾部最近几条，既能修正本次乱序，也避免每次写入都全量排序。
+        sortable_recent = []
+        for idx, item in enumerate(recent_messages):
+            item_dt = self._parse_message_time(item.get("time")) or datetime.max
+            sortable_recent.append((item_dt, idx, item))
+        sortable_recent.append((current_dt, len(recent_messages), entry))
+        sortable_recent.sort(key=lambda x: (x[0], x[1]))
+        messages[recent_start:] = [item for _, _, item in sortable_recent]
+        return messages
+
+    def save_message(self, chat_name, sender, content, msg_type, msg_attr, max_count, message_time=None):
         """写入一条消息到记忆文件，超出 max_count 时删除最旧的"""
         path  = self._get_memory_path(chat_name)
+        entry_time = self._normalize_message_time(message_time)
         entry = {
-            "time":    datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
+            "time":    entry_time,
             "type":    str(msg_type),
             "attr":    str(msg_attr),
             "sender":  str(sender),
@@ -678,7 +731,7 @@ class MemoryManager:
                     messages = []
             else:
                 messages = []
-            messages.append(entry)
+            messages = self._append_message_in_order(messages, entry, recent_count=5)
             if len(messages) > max_count:
                 messages = messages[-max_count:]
             with open(path, 'w', encoding='utf-8') as f:
@@ -2248,8 +2301,9 @@ class WXBot:
         """
         try:
             # 记录原始消息日志
+            message_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
             text = (
-                datetime.now().strftime("%Y/%m/%d %H:%M:%S ")
+                message_time + " "
                 + f'类型：{msg.type} 属性：{msg.attr} 窗口：{chat.who}'
                 + f' 发送人：{msg.sender} - 消息：{msg.content}'
             )
@@ -2352,6 +2406,7 @@ class WXBot:
                         msg_type=msg.type,
                         msg_attr=msg.attr,
                         max_count=self.config.memory_max_count,
+                        message_time=message_time,
                     )
                 except Exception as e:
                     log(level="WARNING", message=f"写入记忆失败: {e}")
@@ -2601,9 +2656,15 @@ class WXBot:
                     if target:
                         time.sleep(1)
                         if src_msg:
-                            message.forward(target, message=src_msg)
+                            if message.type in ['image', 'video', 'file', 'location', 'link', 'emotion', 'merge', 'personal_card', 'note']:
+                                message.forward(target, message=src_msg)
+                            else:
+                                self.wx.SendMsg(who=target, msg=message.content+"\n"+src_msg)
                         else:
-                            message.forward(target)
+                            if message.type in ['image', 'video', 'file', 'location', 'link', 'emotion', 'merge', 'personal_card', 'note']:
+                                message.forward(target)
+                            else:
+                                self.wx.SendMsg(who=target, msg=message.content)
                         log(message=f"[自定义转发] {chat.who} → {target}（规则类型：{rule_type}，附带来源：{forward_with_source}）")
 
     def wx_send_ai(self, chat, message):
