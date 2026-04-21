@@ -777,16 +777,29 @@ class OpenAIAPI:
                 if role == 'user' and sender:
                     content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                 else:
-                    content = f"[{t}] {raw}" if t else raw
+                    content = raw
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": message})
 
+        # --- Skills 工具调用支持 ---
         try:
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=stream,
-            )
+            from skills import get_all_tools, execute_tool
+            _skills_tools = get_all_tools()
+        except Exception:
+            _skills_tools = []
+
+        # 有 Skills 时强制非流式（function calling 不兼容流式）
+        _use_stream = stream if not _skills_tools else False
+
+        try:
+            _create_kwargs = {
+                "model": model,
+                "messages": messages,
+                "stream": _use_stream,
+            }
+            if _skills_tools:
+                _create_kwargs["tools"] = _skills_tools
+            response = self.client.chat.completions.create(**_create_kwargs)
         except Exception as e:
             error_msg = str(e)
             error_type = type(e).__name__
@@ -834,6 +847,39 @@ class OpenAIAPI:
                 # 非流式模式：直接取 choices[0] 的消息内容
                 if response.choices and len(response.choices) > 0:
                     message_obj = response.choices[0].message
+
+                    # --- 处理 Skills tool_calls ---
+                    if hasattr(message_obj, 'tool_calls') and message_obj.tool_calls:
+                        log(message=f"AI 请求调用工具: {[tc.function.name for tc in message_obj.tool_calls]}")
+                        # 把 assistant 的 tool_call 消息加入对话
+                        messages.append(message_obj)
+                        # 逐个执行工具并收集结果
+                        for tc in message_obj.tool_calls:
+                            log(message=f"执行 Skill: {tc.function.name}({tc.function.arguments})")
+                            try:
+                                tool_result = execute_tool(tc.function.name, tc.function.arguments)
+                            except Exception as te:
+                                tool_result = f"工具执行失败: {te}"
+                            log(message=f"Skill 结果: {tool_result[:200]}")
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": tool_result,
+                            })
+                        # 第二次调用 AI，让它根据工具结果生成最终回复
+                        try:
+                            response2 = self.client.chat.completions.create(
+                                model=model,
+                                messages=messages,
+                                tools=_skills_tools,
+                            )
+                            if response2.choices and response2.choices[0].message.content:
+                                output = response2.choices[0].message.content
+                                log(message=f"Skills 最终回复：{output[:100]}...")
+                                return output
+                        except Exception as e2:
+                            log(level="WARN", message=f"Skills 二次调用失败: {e2}")
+                            return tool_result  # 降级直接返回工具结果
 
                     # 检查是否有 content 属性
                     if hasattr(message_obj, 'content') and message_obj.content:
@@ -1052,7 +1098,7 @@ class CozeAPI:
                 raw = h.get('content', '')
                 sender = h.get('sender', '')
                 if h.get('attr') == 'self':
-                    content = f"[{t}] {raw}" if t else raw
+                    content = raw
                     try:
                         additional_messages.append(CozeMessage.build_assistant_answer(content))
                     except Exception:
@@ -1061,7 +1107,7 @@ class CozeAPI:
                     if sender:
                         content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                     else:
-                        content = f"[{t}] {raw}" if t else raw
+                        content = raw
                     additional_messages.append(CozeMessage.build_user_question_text(content))
         additional_messages.append(CozeMessage.build_user_question_text(message))
         chunk_message = ""
@@ -1332,7 +1378,7 @@ class DusAPI:
                     if role == 'user' and sender:
                         content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                     else:
-                        content = f"[{t}] {raw}" if t else raw
+                        content = raw
                     messages.append({"role": role, "content": content})
             messages.append({"role": "user", "content": user_content})
 
@@ -1424,7 +1470,7 @@ class DusAPI:
                     if role == 'user' and sender:
                         content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                     else:
-                        content = f"[{t}] {raw}" if t else raw
+                        content = raw
                     input_items.append({
                         "role": role,
                         "content": content
@@ -1847,6 +1893,8 @@ class WXBot:
         log(message=f"定时消息时间到（{repeat_type}），目标：{targets}，正在发送...")
         for user in targets:
             for msg in msgs:
+                # --- 动态占位符替换（如 {weather:南京}）---
+                msg = self._replace_placeholders(msg)
                 log(message=f"正在向 {user} 发送定时消息：{msg}")
                 try:
                     if self.is_image_path(msg):
@@ -1877,6 +1925,94 @@ class WXBot:
             self.config.save_config()
             log(message=f"一次性定时任务 {task_id} 已执行完毕，自动禁用")
             return schedule.CancelJob  # 取消该 schedule 任务
+
+    # ----------------------------------------------------------
+    # 定时消息动态占位符替换
+    # ----------------------------------------------------------
+
+    def _replace_placeholders(self, text):
+        """
+        替换定时消息中的动态占位符。
+
+        支持的占位符：
+          {date}                — 当天日期，如 2026年4月16日 星期三
+          {date_tomorrow}       — 明天日期，如 2026年4月17日 星期四
+          {weather:城市名}       — 该城市的完整天气（多行）
+          {weather_brief:城市}   — 该城市的精简天气（一行）
+          {weather_tomorrow:城市} — 该城市明天的天气预报（一行）
+
+        :param text: 原始消息文本
+        :return: 替换后的文本
+        """
+        import re
+        from datetime import datetime, timedelta
+
+        # 将文本中的字面 \n 转换为真正的换行
+        text = text.replace('\\n', '\n')
+
+        # 替换 {date}
+        if '{date}' in text:
+            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            now = datetime.now()
+            date_str = f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
+            text = text.replace('{date}', date_str)
+
+        # 替换 {date_tomorrow}
+        if '{date_tomorrow}' in text:
+            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            tmr = datetime.now() + timedelta(days=1)
+            date_str = f"{tmr.year}年{tmr.month}月{tmr.day}日 {weekdays[tmr.weekday()]}"
+            text = text.replace('{date_tomorrow}', date_str)
+
+        # 替换 {weather_tomorrow:xxx}（明天预报，一行）
+        tmr_pattern = r'\{weather_tomorrow:([^}]+)\}'
+        tmr_matches = re.findall(tmr_pattern, text)
+        if tmr_matches:
+            try:
+                from skills.weather import get_tomorrow
+                for city in tmr_matches:
+                    try:
+                        tmr_data = get_tomorrow(city.strip())
+                        text = text.replace(f"{{weather_tomorrow:{city}}}", tmr_data, 1)
+                    except Exception as e:
+                        log(level="ERROR", message=f"获取 {city} 明日天气失败: {e}")
+                        text = text.replace(f"{{weather_tomorrow:{city}}}", "明日天气获取失败", 1)
+            except ImportError:
+                log(level="WARN", message="天气 Skill 未安装")
+
+        # 替换 {weather_brief:xxx}（精简版，一行）
+        brief_pattern = r'\{weather_brief:([^}]+)\}'
+        brief_matches = re.findall(brief_pattern, text)
+        if brief_matches:
+            try:
+                from skills.weather import get_brief
+                for city in brief_matches:
+                    try:
+                        brief = get_brief(city.strip())
+                        text = text.replace(f"{{weather_brief:{city}}}", brief, 1)
+                    except Exception as e:
+                        log(level="ERROR", message=f"获取 {city} 精简天气失败: {e}")
+                        text = text.replace(f"{{weather_brief:{city}}}", "天气获取失败", 1)
+            except ImportError:
+                log(level="WARN", message="天气 Skill 未安装")
+
+        # 替换 {weather:xxx}（完整版，多行）
+        full_pattern = r'\{weather:([^}]+)\}'
+        full_matches = re.findall(full_pattern, text)
+        if full_matches:
+            try:
+                from skills.weather import execute as get_weather
+                for city in full_matches:
+                    try:
+                        weather_data = get_weather({"city": city.strip()})
+                        text = text.replace(f"{{weather:{city}}}", weather_data, 1)
+                    except Exception as e:
+                        log(level="ERROR", message=f"获取 {city} 天气失败: {e}")
+                        text = text.replace(f"{{weather:{city}}}", f"{city}: 天气获取失败", 1)
+            except ImportError:
+                log(level="WARN", message="天气 Skill 未安装")
+
+        return text
 
     # ----------------------------------------------------------
     # 定时朋友圈发送
