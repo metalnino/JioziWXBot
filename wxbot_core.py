@@ -2,8 +2,8 @@
 # Siver微信机器人 siver_wxbot - 面向对象版本 - wxautox4版本
 # 作者：https://www.siver.top
 
-version = "V4.7.17"
-version_log = "V4.7.17 - 适配最新4.1.9.23客户端(源码用户需更新wxautox4内核库至最新)、优化图片下载兼容嵌入式打开图片、内核库更新优化"
+version = "V4.7.13"
+version_log = "V4.7.13 - 适配最新客户端4.1.8.107、优化更新通知、bug修复复"
 
 # ============================================================
 # 标准库导入
@@ -96,17 +96,6 @@ SPLIT_PROMPT_TEMPLATE = """\
 
 若无需拆分则正常回复，不要添加任何分隔符。
 严禁在正文内容中出现 ||SPLIT|| 字样。
-如果你想分条回复，一定一定一定要在每个分条直接加上这个分隔符||SPLIT||，不然程序无法处理分条发送。
-如果你要换2行来进行分段回复，那请将换两行这个操作改成用分隔符回复的分条回复，以下是示例：
-原始内容：
-好的，我来解释一下。
-
-这个问题其实很常见，主要原因是……
-
-改动后内容：
-好的，我来解释一下。
-||SPLIT||
-这个问题其实很常见，主要原因是……
 【以下是你的角色设定】
 {base_prompt}"""
 
@@ -668,63 +657,11 @@ class MemoryManager:
         os.makedirs(dir_path, exist_ok=True)
         return os.path.join(dir_path, f"{chat_name}_memory.json")
 
-    @staticmethod
-    def _normalize_message_time(message_time=None):
-        """将外部传入的时间统一转成记忆文件使用的字符串格式。"""
-        if isinstance(message_time, datetime):
-            return message_time.strftime("%Y/%m/%d %H:%M:%S")
-        if isinstance(message_time, str):
-            message_time = message_time.strip()
-            if message_time:
-                return message_time
-        return datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-
-    @staticmethod
-    def _parse_message_time(message_time):
-        """解析记忆时间字符串；解析失败时返回 None，避免影响主流程。"""
-        if not message_time:
-            return None
-        try:
-            return datetime.strptime(str(message_time), "%Y/%m/%d %H:%M:%S")
-        except Exception:
-            return None
-
-    def _append_message_in_order(self, messages, entry, recent_count=5):
-        """在最近 recent_count 条范围内按时间插入，修正回调并发导致的乱序写入。"""
-        current_dt = self._parse_message_time(entry.get("time"))
-        if current_dt is None or not messages:
-            messages.append(entry)
-            return messages
-
-        recent_start = max(0, len(messages) - recent_count)
-        recent_messages = messages[recent_start:]
-        has_later_recent = False
-        for item in recent_messages:
-            item_dt = self._parse_message_time(item.get("time"))
-            if item_dt and item_dt > current_dt:
-                has_later_recent = True
-                break
-
-        if not has_later_recent:
-            messages.append(entry)
-            return messages
-
-        # 只重排尾部最近几条，既能修正本次乱序，也避免每次写入都全量排序。
-        sortable_recent = []
-        for idx, item in enumerate(recent_messages):
-            item_dt = self._parse_message_time(item.get("time")) or datetime.max
-            sortable_recent.append((item_dt, idx, item))
-        sortable_recent.append((current_dt, len(recent_messages), entry))
-        sortable_recent.sort(key=lambda x: (x[0], x[1]))
-        messages[recent_start:] = [item for _, _, item in sortable_recent]
-        return messages
-
-    def save_message(self, chat_name, sender, content, msg_type, msg_attr, max_count, message_time=None):
+    def save_message(self, chat_name, sender, content, msg_type, msg_attr, max_count):
         """写入一条消息到记忆文件，超出 max_count 时删除最旧的"""
         path  = self._get_memory_path(chat_name)
-        entry_time = self._normalize_message_time(message_time)
         entry = {
-            "time":    entry_time,
+            "time":    datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
             "type":    str(msg_type),
             "attr":    str(msg_attr),
             "sender":  str(sender),
@@ -741,7 +678,7 @@ class MemoryManager:
                     messages = []
             else:
                 messages = []
-            messages = self._append_message_in_order(messages, entry, recent_count=5)
+            messages.append(entry)
             if len(messages) > max_count:
                 messages = messages[-max_count:]
             with open(path, 'w', encoding='utf-8') as f:
@@ -840,21 +777,25 @@ class OpenAIAPI:
                 if role == 'user' and sender:
                     content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                 else:
-                    content = f"[{t}] {raw}" if t else raw
+                    content = raw
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": message})
 
-        # --- Skills 工具调用支持 (Injected) ---
+        # --- Skills 工具调用支持 ---
         try:
             from skills import get_all_tools, execute_tool
             _skills_tools = get_all_tools()
         except Exception:
             _skills_tools = []
+
+        # 有 Skills 时强制非流式（function calling 不兼容流式）
         _use_stream = stream if not _skills_tools else False
 
         try:
             _create_kwargs = {
-                "model": model, "messages": messages, "stream": _use_stream
+                "model": model,
+                "messages": messages,
+                "stream": _use_stream,
             }
             if _skills_tools:
                 _create_kwargs["tools"] = _skills_tools
@@ -908,27 +849,37 @@ class OpenAIAPI:
                     message_obj = response.choices[0].message
 
                     # --- 处理 Skills tool_calls ---
-
-                    if hasattr(message_obj, "tool_calls") and message_obj.tool_calls:
-
+                    if hasattr(message_obj, 'tool_calls') and message_obj.tool_calls:
+                        log(message=f"AI 请求调用工具: {[tc.function.name for tc in message_obj.tool_calls]}")
+                        # 把 assistant 的 tool_call 消息加入对话
                         messages.append(message_obj)
-
+                        # 逐个执行工具并收集结果
                         for tc in message_obj.tool_calls:
-
-                            try: tool_result = execute_tool(tc.function.name, tc.function.arguments)
-
-                            except Exception as e: tool_result = str(e)
-
-                            messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
-
+                            log(message=f"执行 Skill: {tc.function.name}({tc.function.arguments})")
+                            try:
+                                tool_result = execute_tool(tc.function.name, tc.function.arguments)
+                            except Exception as te:
+                                tool_result = f"工具执行失败: {te}"
+                            log(message=f"Skill 结果: {tool_result[:200]}")
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": tool_result,
+                            })
+                        # 第二次调用 AI，让它根据工具结果生成最终回复
                         try:
-
-                            response2 = self.client.chat.completions.create(model=model, messages=messages, tools=_skills_tools)
-
-                            if response2.choices and response2.choices[0].message.content: return response2.choices[0].message.content
-
-                        except Exception: return tool_result
-
+                            response2 = self.client.chat.completions.create(
+                                model=model,
+                                messages=messages,
+                                tools=_skills_tools,
+                            )
+                            if response2.choices and response2.choices[0].message.content:
+                                output = response2.choices[0].message.content
+                                log(message=f"Skills 最终回复：{output[:100]}...")
+                                return output
+                        except Exception as e2:
+                            log(level="WARN", message=f"Skills 二次调用失败: {e2}")
+                            return tool_result  # 降级直接返回工具结果
 
                     # 检查是否有 content 属性
                     if hasattr(message_obj, 'content') and message_obj.content:
@@ -1147,7 +1098,7 @@ class CozeAPI:
                 raw = h.get('content', '')
                 sender = h.get('sender', '')
                 if h.get('attr') == 'self':
-                    content = f"[{t}] {raw}" if t else raw
+                    content = raw
                     try:
                         additional_messages.append(CozeMessage.build_assistant_answer(content))
                     except Exception:
@@ -1156,7 +1107,7 @@ class CozeAPI:
                     if sender:
                         content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                     else:
-                        content = f"[{t}] {raw}" if t else raw
+                        content = raw
                     additional_messages.append(CozeMessage.build_user_question_text(content))
         additional_messages.append(CozeMessage.build_user_question_text(message))
         chunk_message = ""
@@ -1427,7 +1378,7 @@ class DusAPI:
                     if role == 'user' and sender:
                         content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                     else:
-                        content = f"[{t}] {raw}" if t else raw
+                        content = raw
                     messages.append({"role": role, "content": content})
             messages.append({"role": "user", "content": user_content})
 
@@ -1519,7 +1470,7 @@ class DusAPI:
                     if role == 'user' and sender:
                         content = f"[{t}] {sender}: {raw}" if t else f"{sender}: {raw}"
                     else:
-                        content = f"[{t}] {raw}" if t else raw
+                        content = raw
                     input_items.append({
                         "role": role,
                         "content": content
@@ -1904,54 +1855,6 @@ class WXBot:
     # 定时消息发送
     # ----------------------------------------------------------
 
-
-    # ----------------------------------------------------------
-    # 定时消息动态占位符替换 (Patcher 自动注入)
-    # ----------------------------------------------------------
-    def _replace_placeholders(self, text):
-        import re
-        from datetime import datetime, timedelta
-        text = text.replace('\\n', '\n')
-        if '{date}' in text:
-            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
-            now = datetime.now()
-            date_str = f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
-            text = text.replace('{date}', date_str)
-        if '{date_tomorrow}' in text:
-            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
-            tmr = datetime.now() + timedelta(days=1)
-            date_str = f"{tmr.year}年{tmr.month}月{tmr.day}日 {weekdays[tmr.weekday()]}"
-            text = text.replace('{date_tomorrow}', date_str)
-        
-        tmr_pattern = r'\{weather_tomorrow:([^}]+)\}'
-        tmr_matches = re.findall(tmr_pattern, text)
-        if tmr_matches:
-            try:
-                from skills.weather import get_tomorrow
-                for city in tmr_matches:
-                    try:
-                        tmr_data = get_tomorrow(city.strip())
-                        text = text.replace(f"{{weather_tomorrow:{city}}}", tmr_data, 1)
-                    except Exception:
-                        text = text.replace(f"{{weather_tomorrow:{city}}}", "明日天气获取失败", 1)
-            except ImportError:
-                pass
-                
-        brief_pattern = r'\{weather_brief:([^}]+)\}'
-        brief_matches = re.findall(brief_pattern, text)
-        if brief_matches:
-            try:
-                from skills.weather import get_weather_brief
-                for city in brief_matches:
-                    try:
-                        bdata = get_weather_brief(city.strip())
-                        text = text.replace(f"{{weather_brief:{city}}}", bdata, 1)
-                    except Exception:
-                        text = text.replace(f"{{weather_brief:{city}}}", "天气简报获取失败", 1)
-            except ImportError:
-                pass
-        return text
-
     def send_scheduled_msg(self, targets, msgs, repeat_type, weekdays, dates, task_id):
         """
         定时触发的消息发送函数，根据 repeat_type 判断今天是否需要发送。
@@ -1990,9 +1893,8 @@ class WXBot:
         log(message=f"定时消息时间到（{repeat_type}），目标：{targets}，正在发送...")
         for user in targets:
             for msg in msgs:
-                # --- 动态占位符 ---
-                if hasattr(self, "_replace_placeholders"):
-                    msg = self._replace_placeholders(msg)
+                # --- 动态占位符替换（如 {weather:南京}）---
+                msg = self._replace_placeholders(msg)
                 log(message=f"正在向 {user} 发送定时消息：{msg}")
                 try:
                     if self.is_image_path(msg):
@@ -2023,6 +1925,94 @@ class WXBot:
             self.config.save_config()
             log(message=f"一次性定时任务 {task_id} 已执行完毕，自动禁用")
             return schedule.CancelJob  # 取消该 schedule 任务
+
+    # ----------------------------------------------------------
+    # 定时消息动态占位符替换
+    # ----------------------------------------------------------
+
+    def _replace_placeholders(self, text):
+        """
+        替换定时消息中的动态占位符。
+
+        支持的占位符：
+          {date}                — 当天日期，如 2026年4月16日 星期三
+          {date_tomorrow}       — 明天日期，如 2026年4月17日 星期四
+          {weather:城市名}       — 该城市的完整天气（多行）
+          {weather_brief:城市}   — 该城市的精简天气（一行）
+          {weather_tomorrow:城市} — 该城市明天的天气预报（一行）
+
+        :param text: 原始消息文本
+        :return: 替换后的文本
+        """
+        import re
+        from datetime import datetime, timedelta
+
+        # 将文本中的字面 \n 转换为真正的换行
+        text = text.replace('\\n', '\n')
+
+        # 替换 {date}
+        if '{date}' in text:
+            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            now = datetime.now()
+            date_str = f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
+            text = text.replace('{date}', date_str)
+
+        # 替换 {date_tomorrow}
+        if '{date_tomorrow}' in text:
+            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            tmr = datetime.now() + timedelta(days=1)
+            date_str = f"{tmr.year}年{tmr.month}月{tmr.day}日 {weekdays[tmr.weekday()]}"
+            text = text.replace('{date_tomorrow}', date_str)
+
+        # 替换 {weather_tomorrow:xxx}（明天预报，一行）
+        tmr_pattern = r'\{weather_tomorrow:([^}]+)\}'
+        tmr_matches = re.findall(tmr_pattern, text)
+        if tmr_matches:
+            try:
+                from skills.weather import get_tomorrow
+                for city in tmr_matches:
+                    try:
+                        tmr_data = get_tomorrow(city.strip())
+                        text = text.replace(f"{{weather_tomorrow:{city}}}", tmr_data, 1)
+                    except Exception as e:
+                        log(level="ERROR", message=f"获取 {city} 明日天气失败: {e}")
+                        text = text.replace(f"{{weather_tomorrow:{city}}}", "明日天气获取失败", 1)
+            except ImportError:
+                log(level="WARN", message="天气 Skill 未安装")
+
+        # 替换 {weather_brief:xxx}（精简版，一行）
+        brief_pattern = r'\{weather_brief:([^}]+)\}'
+        brief_matches = re.findall(brief_pattern, text)
+        if brief_matches:
+            try:
+                from skills.weather import get_brief
+                for city in brief_matches:
+                    try:
+                        brief = get_brief(city.strip())
+                        text = text.replace(f"{{weather_brief:{city}}}", brief, 1)
+                    except Exception as e:
+                        log(level="ERROR", message=f"获取 {city} 精简天气失败: {e}")
+                        text = text.replace(f"{{weather_brief:{city}}}", "天气获取失败", 1)
+            except ImportError:
+                log(level="WARN", message="天气 Skill 未安装")
+
+        # 替换 {weather:xxx}（完整版，多行）
+        full_pattern = r'\{weather:([^}]+)\}'
+        full_matches = re.findall(full_pattern, text)
+        if full_matches:
+            try:
+                from skills.weather import execute as get_weather
+                for city in full_matches:
+                    try:
+                        weather_data = get_weather({"city": city.strip()})
+                        text = text.replace(f"{{weather:{city}}}", weather_data, 1)
+                    except Exception as e:
+                        log(level="ERROR", message=f"获取 {city} 天气失败: {e}")
+                        text = text.replace(f"{{weather:{city}}}", f"{city}: 天气获取失败", 1)
+            except ImportError:
+                log(level="WARN", message="天气 Skill 未安装")
+
+        return text
 
     # ----------------------------------------------------------
     # 定时朋友圈发送
@@ -2394,9 +2384,8 @@ class WXBot:
         """
         try:
             # 记录原始消息日志
-            message_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
             text = (
-                message_time + " "
+                datetime.now().strftime("%Y/%m/%d %H:%M:%S ")
                 + f'类型：{msg.type} 属性：{msg.attr} 窗口：{chat.who}'
                 + f' 发送人：{msg.sender} - 消息：{msg.content}'
             )
@@ -2499,7 +2488,6 @@ class WXBot:
                         msg_type=msg.type,
                         msg_attr=msg.attr,
                         max_count=self.config.memory_max_count,
-                        message_time=message_time,
                     )
                 except Exception as e:
                     log(level="WARNING", message=f"写入记忆失败: {e}")
@@ -2590,7 +2578,7 @@ class WXBot:
                             # 直接图片消息：content 已被替换为本地路径
                             rec_api = self._init_api_by_index(self.config.group_image_recognition_api)
                             reply = rec_api.chat(
-                                f"{message.sender}: [这是 {message.sender} 单独发送的一条图片消息，请根据上下文语境分析这张图片和发送者发送的意图进行回复]",
+                                f"{message.sender}: 请简短描述这张图片的内容",
                                 prompt=_effective_group_prompt,
                                 history=history,
                                 image_path=message.content
@@ -2600,7 +2588,7 @@ class WXBot:
                             text_part, img_path = content_without_at.split('+引用的图片:', 1)
                             rec_api = self._init_api_by_index(self.config.group_image_recognition_api)
                             reply = rec_api.chat(
-                                f"{message.sender}: {text_part.strip()}" if text_part.strip() else f"{message.sender}: [这是 {message.sender} 单独发送的一条图片消息，请根据上下文语境分析这张图片和发送者发送的意图进行回复]",
+                                f"{message.sender}: {text_part.strip()}" if text_part.strip() else f"{message.sender}: 请简短描述这张图片的内容",
                                 prompt=_effective_group_prompt,
                                 history=history,
                                 image_path=img_path.strip()
@@ -2749,15 +2737,9 @@ class WXBot:
                     if target:
                         time.sleep(1)
                         if src_msg:
-                            if message.type in ['image', 'video', 'file', 'location', 'link', 'emotion', 'merge', 'personal_card', 'note']:
-                                message.forward(target, message=src_msg)
-                            else:
-                                self.wx.SendMsg(who=target, msg=message.content+"\n"+src_msg)
+                            message.forward(target, message=src_msg)
                         else:
-                            if message.type in ['image', 'video', 'file', 'location', 'link', 'emotion', 'merge', 'personal_card', 'note']:
-                                message.forward(target)
-                            else:
-                                self.wx.SendMsg(who=target, msg=message.content)
+                            message.forward(target)
                         log(message=f"[自定义转发] {chat.who} → {target}（规则类型：{rule_type}，附带来源：{forward_with_source}）")
 
     def wx_send_ai(self, chat, message):
@@ -2804,7 +2786,7 @@ class WXBot:
                         # 直接图片消息：content 已被替换为本地路径（图片识别优先使用图片识别接口）
                         rec_api = self._init_api_by_index(self.config.chat_image_recognition_api)
                         reply = rec_api.chat(
-                            "[这是单独发送的一条图片消息，请根据上下文语境分析这张图片和发送者发送的意图进行回复]",
+                            "请简短描述这张图片的内容",
                             prompt=_effective_prompt,
                             history=history,
                             image_path=message.content
@@ -2814,7 +2796,7 @@ class WXBot:
                         text_part, img_path = message.content.split('+引用的图片:', 1)
                         rec_api = self._init_api_by_index(self.config.chat_image_recognition_api)
                         reply = rec_api.chat(
-                            text_part.strip() or "[这是单独发送的一条图片消息，请根据上下文语境分析这张图片和发送者发送的意图进行回复]",
+                            text_part.strip() or "请简短描述这张图片的内容",
                             prompt=_effective_prompt,
                             history=history,
                             image_path=img_path.strip()
@@ -3978,9 +3960,9 @@ class WXBot:
             log(level="ERROR", message=str(e) + "\n 初始化微信监听器失败，请检查微信是否启动登录正确，微信主窗口是否开着")
             log(level="ERROR", message=str(e) + "\n 请尝试退出wx再重新登录后再启动")
             log(level="ERROR", message=str(e) + "\n 请尝试退出wx再重新登录后再启动")
-            log(level="ERROR", message=str(e) + "\n 若重启wx还是不行，就请重启整个面板程序，面板和wx都重启了还不行就请进入面板右上角文档检查环境要求，wx版本是否匹配,4.1.7 ~ 4.1.9.23")
-            log(level="ERROR", message=str(e) + "\n 若重启wx还是不行，就请重启整个面板程序，面板和wx都重启了还不行就请进入面板右上角文档检查环境要求，wx版本是否匹配,4.1.7 ~ 4.1.9.23")
-            log(level="ERROR", message=str(e) + "\n 若重启wx还是不行，就请重启整个面板程序，面板和wx都重启了还不行就请进入面板右上角文档检查环境要求，wx版本是否匹配,4.1.7 ~ 4.1.9.23")
+            log(level="ERROR", message=str(e) + "\n 若重启wx还是不行，就请重启整个面板程序，面板和wx都重启了还不行就请进入面板右上角文档检查环境要求，wx版本是否匹配,4.1.7 ~ 4.1.8.107")
+            log(level="ERROR", message=str(e) + "\n 若重启wx还是不行，就请重启整个面板程序，面板和wx都重启了还不行就请进入面板右上角文档检查环境要求，wx版本是否匹配,4.1.7 ~ 4.1.8.107")
+            log(level="ERROR", message=str(e) + "\n 若重启wx还是不行，就请重启整个面板程序，面板和wx都重启了还不行就请进入面板右上角文档检查环境要求，wx版本是否匹配,4.1.7 ~ 4.1.8.107")
             self.run_flag = False
 
         # 主循环
@@ -3998,14 +3980,14 @@ class WXBot:
                         if not self.check_wechat_window():
                             # 微信离线，阻塞等待人工处理
                             self.is_err(self.wx.nickname + " wxbot监听出错！！微信可能已被弹出登录！！在线检查失败！！")
-                            self.stop_wxbot()
-                            log(level="ERROR", message=f"微信 {self.wx.nickname} 已被弹出登录！！请检查微信是否登录！！")
-                            break
+                            while self.run_flag:
+                                log(level="ERROR", message=f"微信{self.wx.nickname}已被弹出登录！！请检查微信是否登录！！")
+                                time.sleep(100)
                     except Exception as e:
                         self.is_err(self.wx.nickname + " wxbot监听出错！！微信可能已被弹出登录！！在线检查失败！！", e)
-                        self.stop_wxbot()
-                        log(level="ERROR", message=f"微信 {self.wx.nickname} 已被弹出登录！！请检查微信是否登录！！")
-                        break
+                        while self.run_flag:
+                            log(level="ERROR", message=f"微信{self.wx.nickname}已被弹出登录！！请检查微信是否登录！！")
+                            time.sleep(100)
                     check_counter = 0
 
                 # ---- 新好友检测模块（随机检查，间隔由配置决定）----
