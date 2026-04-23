@@ -102,6 +102,22 @@ LOG_COLORS = {
 
 log_messages = []
 
+@app.after_request
+def log_request_info(response):
+    if response.status_code == 500:
+        log('ERROR', f"500 ERROR on {request.method} {request.url}")
+    return response
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    err_msg = traceback.format_exc()
+    log('ERROR', f"Unhandled Exception: {err_msg}")
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    return f"Internal Server Error: {str(e)}", 500
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -727,19 +743,26 @@ def save_prompt_route():
             old_path = os.path.join(PROMPT_DIR, f'{old_name}.md')
             if os.path.exists(old_path):
                 os.remove(old_path)
-        # 原子写入
+        # 安全写入：优先原子写入，失败自动降级为直写
         target = os.path.join(PROMPT_DIR, f'{name}.md')
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=PROMPT_DIR, suffix='.tmp')
+        _saved = False
+        tmp_path = None
         try:
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=PROMPT_DIR, suffix='.tmp')
             with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tf:
                 tf.write(content)
             os.replace(tmp_path, target)
+            _saved = True
         except Exception:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-            raise
+            # 原子写入失败（中文路径/文件锁/Errno22 等），清理临时文件后走直写
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+        if not _saved:
+            with open(target, 'w', encoding='utf-8') as tf:
+                tf.write(content)
         log('SUCCESS', f'Prompt 已保存：{name}.md')
         return jsonify({'status': 'success'})
     except Exception as e:

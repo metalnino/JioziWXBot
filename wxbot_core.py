@@ -844,12 +844,21 @@ class OpenAIAPI:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": message})
 
+        # --- Skills 工具调用支持 (Injected) ---
         try:
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=stream,
-            )
+            from skills import get_all_tools, execute_tool
+            _skills_tools = get_all_tools()
+        except Exception:
+            _skills_tools = []
+        _use_stream = stream if not _skills_tools else False
+
+        try:
+            _create_kwargs = {
+                "model": model, "messages": messages, "stream": _use_stream
+            }
+            if _skills_tools:
+                _create_kwargs["tools"] = _skills_tools
+            response = self.client.chat.completions.create(**_create_kwargs)
         except Exception as e:
             error_msg = str(e)
             error_type = type(e).__name__
@@ -897,6 +906,29 @@ class OpenAIAPI:
                 # 非流式模式：直接取 choices[0] 的消息内容
                 if response.choices and len(response.choices) > 0:
                     message_obj = response.choices[0].message
+
+                    # --- 处理 Skills tool_calls ---
+
+                    if hasattr(message_obj, "tool_calls") and message_obj.tool_calls:
+
+                        messages.append(message_obj)
+
+                        for tc in message_obj.tool_calls:
+
+                            try: tool_result = execute_tool(tc.function.name, tc.function.arguments)
+
+                            except Exception as e: tool_result = str(e)
+
+                            messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
+
+                        try:
+
+                            response2 = self.client.chat.completions.create(model=model, messages=messages, tools=_skills_tools)
+
+                            if response2.choices and response2.choices[0].message.content: return response2.choices[0].message.content
+
+                        except Exception: return tool_result
+
 
                     # 检查是否有 content 属性
                     if hasattr(message_obj, 'content') and message_obj.content:
@@ -1872,6 +1904,54 @@ class WXBot:
     # 定时消息发送
     # ----------------------------------------------------------
 
+
+    # ----------------------------------------------------------
+    # 定时消息动态占位符替换 (Patcher 自动注入)
+    # ----------------------------------------------------------
+    def _replace_placeholders(self, text):
+        import re
+        from datetime import datetime, timedelta
+        text = text.replace('\\n', '\n')
+        if '{date}' in text:
+            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            now = datetime.now()
+            date_str = f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
+            text = text.replace('{date}', date_str)
+        if '{date_tomorrow}' in text:
+            weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            tmr = datetime.now() + timedelta(days=1)
+            date_str = f"{tmr.year}年{tmr.month}月{tmr.day}日 {weekdays[tmr.weekday()]}"
+            text = text.replace('{date_tomorrow}', date_str)
+        
+        tmr_pattern = r'\{weather_tomorrow:([^}]+)\}'
+        tmr_matches = re.findall(tmr_pattern, text)
+        if tmr_matches:
+            try:
+                from skills.weather import get_tomorrow
+                for city in tmr_matches:
+                    try:
+                        tmr_data = get_tomorrow(city.strip())
+                        text = text.replace(f"{{weather_tomorrow:{city}}}", tmr_data, 1)
+                    except Exception:
+                        text = text.replace(f"{{weather_tomorrow:{city}}}", "明日天气获取失败", 1)
+            except ImportError:
+                pass
+                
+        brief_pattern = r'\{weather_brief:([^}]+)\}'
+        brief_matches = re.findall(brief_pattern, text)
+        if brief_matches:
+            try:
+                from skills.weather import get_weather_brief
+                for city in brief_matches:
+                    try:
+                        bdata = get_weather_brief(city.strip())
+                        text = text.replace(f"{{weather_brief:{city}}}", bdata, 1)
+                    except Exception:
+                        text = text.replace(f"{{weather_brief:{city}}}", "天气简报获取失败", 1)
+            except ImportError:
+                pass
+        return text
+
     def send_scheduled_msg(self, targets, msgs, repeat_type, weekdays, dates, task_id):
         """
         定时触发的消息发送函数，根据 repeat_type 判断今天是否需要发送。
@@ -1910,6 +1990,9 @@ class WXBot:
         log(message=f"定时消息时间到（{repeat_type}），目标：{targets}，正在发送...")
         for user in targets:
             for msg in msgs:
+                # --- 动态占位符 ---
+                if hasattr(self, "_replace_placeholders"):
+                    msg = self._replace_placeholders(msg)
                 log(message=f"正在向 {user} 发送定时消息：{msg}")
                 try:
                     if self.is_image_path(msg):
