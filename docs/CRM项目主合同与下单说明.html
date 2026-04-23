@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CRM、项目、主合同与下单说明</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #fff;
+      --text: #1a1d21;
+      --muted: #5c6570;
+      --border: #e2e5ea;
+      --accent: #1a5fb4;
+      --accent-soft: #e8f0fc;
+      --warn-bg: #fff8e6;
+      --warn-border: #e5c76a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text);
+      background: var(--bg);
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 28px 18px 48px;
+    }
+    h1 {
+      font-size: 1.45rem;
+      font-weight: 600;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin-bottom: 28px;
+    }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+    }
+    h2 {
+      font-size: 1.05rem;
+      margin: 0 0 12px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    p { margin: 0 0 10px; }
+    p:last-child { margin-bottom: 0; }
+    ul {
+      margin: 8px 0 0;
+      padding-left: 1.25em;
+    }
+    li { margin-bottom: 6px; }
+    li:last-child { margin-bottom: 0; }
+    .callout {
+      background: var(--accent-soft);
+      border-left: 4px solid var(--accent);
+      padding: 12px 14px;
+      margin-top: 12px;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.95rem;
+    }
+    .warn {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    ol.check {
+      margin: 10px 0 0;
+      padding-left: 1.35em;
+    }
+    ol.check li { margin-bottom: 8px; }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 24px;
+    }
+    strong { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>CRM、项目、主合同与下单说明</h1>
+    <p class="sub">面向使用者：从创建信息到成单、主合同、租赁与售卖下单的操作与规则。</p>
+
+    <section>
+      <h2>一、CRM 在干什么</h2>
+      <p><strong>CRM 负责创建信息</strong>：先把客户、商机、需求等信息在 CRM 里建好、维护好。这是后面「成单 → 出项目 → 主合同 → 下单」的基础。</p>
+    </section>
+
+    <section>
+      <h2>二、成单与项目</h2>
+      <p>信息在 CRM 里就绪后，<strong>点「成单」</strong>，系统会<strong>自动创建一个「项目」</strong>。</p>
+      <p><strong>项目</strong>是这一笔成交在系统里的<strong>总工作台</strong>：多个办公点或仓库、多份主合同、植物相关下单，都挂在该项目下。</p>
+    </section>
+
+    <section>
+      <h2>三、项目里有什么</h2>
+      <ul>
+        <li><strong>多个办公点或仓库</strong>：例如办公点 A、办公点 B、C、D 等，可同时存在，表示不同地点履约。</li>
+        <li><strong>多份主合同</strong>：同一项目下可以有多份主合同；是否需要新建，见第五节、第六节。</li>
+        <li><strong>植物相关下单</strong>：都在<strong>项目内</strong>操作，且每笔都要关联<strong>某一份主合同</strong>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>四、主合同为什么重要</h2>
+      <ul>
+        <li><strong>租赁下单</strong>和<strong>售卖下单</strong>，都必须<strong>选中对应的那一份主合同</strong>。</li>
+        <li><strong>租赁和售卖可以下在同一份主合同下</strong>（同一主合同既管租也管卖）。</li>
+        <li>主合同上的<strong>时间约定</strong>与每笔单的<strong>起止日期</strong>参与<strong>成本与结算</strong>；主合同选错，结算容易对不上。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>五、谁能建主合同、多份怎么建</h2>
+      <ul>
+        <li><strong>每个人在同一项目里，自己只能创建 1 份主合同</strong>（通常即该项目下你自建的那份首份主合同）。</li>
+        <li><strong>还需要更多主合同</strong>：<strong>不能</strong>再靠自己多建，<strong>必须找财务</strong>，由财务按规则创建。目的：避免主合同乱建、版本混乱，由财务统一把控。</li>
+        <li><strong>为防止多份主合同分不清</strong>：可在<strong>甲方单位</strong>（或系统里与客户、签约方名称对应的展示字段）上增加<strong>简短区分标记</strong>，例如「新增1」「新增2」，与财务、业务约定一致即可，<strong>下单时便于一眼选对主合同</strong>。</li>
+      </ul>
+      <div class="callout">字段名以你们系统为准：若界面不叫「甲方单位」，而是「客户名称」「签约甲方」等，在同样位置写「新增1」「新增2」即可。</div>
+    </section>
+
+    <section>
+      <h2>六、要不要新建主合同</h2>
+      <p>以<strong>时间</strong>为判断依据之一：若与现有主合同相比，<strong>结束时间相同</strong>，则<strong>不需要</strong>再建一份新主合同；按<strong>补充协议</strong>理解，<strong>继续在原主合同下下单</strong>（租赁、售卖仍选该主合同）。</p>
+      <p>若<strong>不能</strong>再按「仍算原主合同、仅补充」处理，需要<strong>新主合同</strong>的，由<strong>财务</strong>创建（个人不可再自建第二份及以后）。</p>
+      <div class="warn">若公司内部另有细则（例如开始或结束任一端与主合同不一致即须新建），请与「结束时间相同则不必新建」的优先级写清后一并执行，避免执行时冲突。</div>
+    </section>
+
+    <section>
+      <h2>七、操作清单（请逐项对照）</h2>
+      <ol class="check">
+        <li><strong>CRM 先创建、维护好信息</strong>，再走成单。</li>
+        <li>成单后<strong>项目</strong>自动生成，后续在<strong>项目</strong>里操作。</li>
+        <li>每笔<strong>租赁</strong>、每笔<strong>售卖</strong>都要<strong>选对主合同</strong>；两类订单<strong>可共用同一份主合同</strong>。</li>
+        <li><strong>每人仅可自建 1 份主合同</strong>；更多主合同<strong>找财务</strong>；多份时建议在甲方单位（或客户名称等字段）用「新增1」「新增2」等<strong>标记</strong>区分。</li>
+        <li><strong>结束时间与现有主合同一致</strong>：<strong>不新建</strong>主合同，在原主合同下按补充继续下单。</li>
+      </ol>
+    </section>
+
+    <footer>内部使用说明，可按实际字段名与财务规则微调后发布。</footer>
+  </div>
+</body>
+</html>
