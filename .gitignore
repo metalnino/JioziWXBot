@@ -27,6 +27,7 @@ backup/
 wxautox文件下载/
 old_wxbot_config/
 docs/admin
+docs/panel
 
 *.zip
 *.whl
